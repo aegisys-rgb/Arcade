@@ -89,7 +89,7 @@
     for (let i = 0; i < n; i++) shape.push(rand(0.74, 1.14));
     return {
       x, y, tier, r, hp: [2, 5, 10][tier], shape,
-      vx: vx !== undefined ? vx : rand(-60, 60), vy: vy !== undefined ? vy : rand(-60, 60),
+      vx: vx !== undefined ? vx : rand(-85, 85), vy: vy !== undefined ? vy : rand(-85, 85),
       rot: Math.random() * TAU, spin: rand(-0.8, 0.8), flash: 0,
     };
   }
@@ -101,6 +101,20 @@
       const t = Math.random();
       asts.push(mkAst(x, y, t < 0.3 ? 0 : t < 0.75 ? 1 : 2));
     }
+  }
+  // A fast rock thrown at where the ship is heading, from just off screen.
+  function spawnMeteor() {
+    if (asts.length > 480) return;
+    const v = Math.hypot(ship.vx, ship.vy);
+    const base = v > 60 ? Math.atan2(ship.vy, ship.vx) : Math.random() * TAU;
+    const an = base + rand(-1.3, 1.3), d = Math.max(W, H) * 0.62 + 80;
+    const x = clamp(ship.x + Math.cos(an) * d, 30, world.w - 30), y = clamp(ship.y + Math.sin(an) * d, 30, world.h - 30);
+    if (Math.hypot(x - ship.x, y - ship.y) < 420) return;
+    const sp = rand(170, 250) + 25 * diff(), t = (Math.hypot(x - ship.x, y - ship.y)) / sp;
+    const aim = Math.atan2(ship.y + ship.vy * t * 0.7 - y, ship.x + ship.vx * t * 0.7 - x) + rand(-0.12, 0.12);
+    const a = mkAst(x, y, Math.random() < 0.55 ? 0 : 1, Math.cos(aim) * sp, Math.sin(aim) * sp);
+    a.fast = true;
+    asts.push(a);
   }
   function mkEnemy(type, x, y, extra) {
     const base = {
@@ -140,22 +154,23 @@
   };
   const MISSIONS = [
     {
-      name: 'THE BELT', type: 'run', world: [6000, 1800], par: 70,
+      name: 'THE BELT', type: 'run', world: [12000, 1800], par: 80, meteors: 1.6,
       brief: 'Cross the asteroid belt and reach the jump gate.',
       setup() {
-        spawnAsts(85 + 15 * diff(), 500, 5600);
-        for (let i = 0; i < 8 + 2 * diff(); i++) mkEnemy('drone', rand(1500, 5400), rand(200, 1600), { dormant: true });
-        M.gate = { x: 5750, y: 900, r: 70 };
+        spawnAsts(300 + 30 * diff(), 500, 11600);
+        for (let i = 0; i < 3 + diff(); i++) mkEnemy('fighter', rand(4000, 11000), rand(200, 1600), { dormant: true });
+        for (let i = 0; i < 8 + 2 * diff(); i++) mkEnemy('drone', rand(1500, 11000), rand(200, 1600), { dormant: true });
+        M.gate = { x: 11700, y: 900, r: 90 };
       },
       objective: () => 'REACH THE JUMP GATE',
       nav: () => M.gate,
       done: () => dist(ship, M.gate) < M.gate.r,
     },
     {
-      name: 'MAYDAY', type: 'rescue', world: [3000, 2200], par: 110,
+      name: 'MAYDAY', type: 'rescue', world: [3000, 2200], par: 110, meteors: 3.5,
       brief: 'A liner broke up out here. Tractor every escape pod aboard.',
       setup() {
-        spawnAsts(22, 100, 2900);
+        spawnAsts(40, 100, 2900);
         M.total = 5; M.rescued = 0; M.spawnT = 8;
         for (let i = 0; i < M.total; i++) {
           const a = (i / M.total) * TAU + rand(-0.3, 0.3), d = rand(650, 1000);
@@ -180,9 +195,9 @@
       done: () => M.rescued >= M.total,
     },
     {
-      name: 'AMBUSH', type: 'battle', world: [2600, 1900], par: 90,
+      name: 'AMBUSH', type: 'battle', world: [2600, 1900], par: 90, meteors: 5,
       brief: 'Pirate wings inbound. Destroy all three waves.',
-      setup() { spawnAsts(10, 100, 2500); M.wave = 0; M.waveT = 2.5; M.waves = 3; },
+      setup() { spawnAsts(18, 100, 2500); M.wave = 0; M.waveT = 2.5; M.waves = 3; },
       update(dt) {
         if (enemies.length === 0 && M.wave < M.waves) {
           M.waveT -= dt;
@@ -229,24 +244,24 @@
       done: () => M.station.dock >= 2.2,
     },
     {
-      name: 'IRON STORM', type: 'run', world: [7000, 1800], par: 95,
+      name: 'IRON STORM', type: 'run', world: [14000, 1800], par: 100, meteors: 1.1,
       brief: 'Dense rock, live mines, pirate patrols. Punch through to the gate.',
       setup() {
-        spawnAsts(95 + 15 * diff(), 500, 6600);
-        for (let i = 0; i < 20 + 4 * diff(); i++) mkEnemy('mine', rand(1200, 6500), rand(120, 1680));
-        for (let g = 0; g < 3; g++) {
-          const gx = 2000 + g * 1600;
+        spawnAsts(350 + 30 * diff(), 500, 13600);
+        for (let i = 0; i < 40 + 6 * diff(); i++) mkEnemy('mine', rand(1200, 13400), rand(120, 1680));
+        for (let g = 0; g < 6; g++) {
+          const gx = 2200 + g * 1900;
           for (let i = 0; i < 3 + diff(); i++) mkEnemy('fighter', gx + rand(-150, 150), rand(300, 1500), { dormant: true });
           mkEnemy('drone', gx + rand(-150, 150), rand(300, 1500), { dormant: true });
         }
-        M.gate = { x: 6750, y: 900, r: 70 };
+        M.gate = { x: 13700, y: 900, r: 90 };
       },
       objective: () => 'REACH THE JUMP GATE',
       nav: () => M.gate,
       done: () => dist(ship, M.gate) < M.gate.r,
     },
     {
-      name: 'DREADNOUGHT', type: 'boss', world: [2800, 2000], par: 150,
+      name: 'DREADNOUGHT', type: 'boss', world: [2800, 2000], par: 150, meteors: 5,
       brief: 'The pirate flagship. Strip its turrets, then crack the core.',
       setup() {
         spawnAsts(8, 100, 2700);
@@ -316,7 +331,7 @@
   }
 
   // ---------------------------------------------------------------- combat
-  function shieldHalf() { return ship.power === 'shd' ? 1.45 : 0.95; }
+  function shieldHalf() { return ship.power === 'shd' ? 1.1 : 0.7; }
   function shieldBlocks(ang) { return ship.shieldOn && Math.abs(angDiff(ang, ship.shieldAng)) < shieldHalf(); }
   function absorb(dmg) {
     ship.shield -= dmg * 2.2 * (ship.power === 'shd' ? 0.75 : 1);
@@ -495,17 +510,17 @@
       // Auto-gunner: slower, short-sighted, but keeps a 1-2 player crew alive.
       let tgt = null, bd = 520;
       for (const e of enemies) { if (e.dormant) continue; const d = dist(e, ship); if (d < bd && !(e.type === 'boss' && turretsAlive())) { bd = d; tgt = e; } }
-      if (!tgt) { bd = 260; for (const a of asts) { const d = dist(a, ship) - a.r; if (d < bd) { bd = d; tgt = a; } } }
+      if (!tgt) { bd = 190; for (const a of asts) { const d = dist(a, ship) - a.r; if (d < bd) { bd = d; tgt = a; } } }
       let pk = null;
       if (!tgt) { bd = tractorRange() - 20; for (const p of pickups) { const d = dist(p, ship); if (d < bd) { bd = d; pk = p; } } }
       const goal = tgt || pk;
       const lead = tgt ? dist(tgt, ship) / TORP_SPEED : 0; // aim where the target will be
       const gx = goal ? goal.x + goal.vx * lead - cam.x : ship.x - cam.x + Math.cos(ship.ang) * 150;
       const gy = goal ? goal.y + goal.vy * lead - cam.y : ship.y - cam.y + Math.sin(ship.ang) * 150;
-      cross.x = lerp(cross.x, gx, Math.min(1, dt * 10)); cross.y = lerp(cross.y, gy, Math.min(1, dt * 10));
+      cross.x = lerp(cross.x, gx, Math.min(1, dt * 4)); cross.y = lerp(cross.y, gy, Math.min(1, dt * 4));
       fire = !!tgt && Math.hypot(cross.x - gx, cross.y - gy) < 30 && ship.heat < 0.7;
       tractor = !!pk;
-      rate = 0.5;
+      rate = 0.4;
     }
     cross.x = clamp(cross.x, 8, W - 8); cross.y = clamp(cross.y, 8, H - 8);
     const ax = cross.x + cam.x, ay = cross.y + cam.y;
@@ -571,9 +586,8 @@
       if (p.pressed[5]) setPower({ eng: 'wep', wep: 'shd', shd: 'eng' }[ship.power]);
     } else {
       const a = nearestThreatAngle();
-      if (a !== null) ship.shieldAng = turnTo(ship.shieldAng, a, 3.5 * dt);
-      if (ship.hull < 50 && ship.shield > 60) ship.repairing = true;
-      if (bullets.filter((b) => dist(b, ship) < 220).length >= 4) fireEmp();
+      // Deliberately sluggish: it never repairs or fires the EMP, and it turns too slowly to cover two threats.
+      if (a !== null) ship.shieldAng = turnTo(ship.shieldAng, a, 1.6 * dt);
     }
     if (ship.repairing && ship.shield > 4 && ship.hull < 100 && ship.shieldOn) {
       ship.shield -= 14 * dt;
@@ -596,7 +610,7 @@
     for (const a of asts) {
       a.x += a.vx * dt; a.y += a.vy * dt; a.rot += a.spin * dt; a.flash -= dt;
       const sp = Math.hypot(a.vx, a.vy);
-      if (sp > 90) { const k = Math.exp(-1.5 * dt); a.vx *= k; a.vy *= k; }
+      if (sp > 120 && !a.fast) { const k = Math.exp(-1.5 * dt); a.vx *= k; a.vy *= k; }
       if (a.x < a.r) { a.x = a.r; a.vx = Math.abs(a.vx); }
       if (a.y < a.r) { a.y = a.r; a.vy = Math.abs(a.vy); }
       if (a.x > world.w - a.r) { a.x = world.w - a.r; a.vx = -Math.abs(a.vx); }
@@ -616,7 +630,7 @@
       }
       a.vx += nx * 40; a.vy += ny * 40;
       if (blocked) { absorb([5, 10, 18][a.tier]); addParts(ship.x + nx * 44, ship.y + ny * 44, 8, C.eng, 160, 0.35, 2.5); damageAst(a, 2, 'eng'); }
-      else if (ship.inv <= 0) { hurt([12, 22, 34][a.tier]); damageAst(a, 2, null); }
+      else if (ship.inv <= 0) { hurt([15, 28, 42][a.tier]); damageAst(a, 2, null); }
     }
   }
 
@@ -704,7 +718,7 @@
       const d = dist(b, ship);
       if (d < 46 && shieldBlocks(Math.atan2(b.y - ship.y, b.x - ship.x))) {
         b.life = 0; absorb(6); addParts(b.x, b.y, 6, C.eng, 140, 0.3, 2.5);
-      } else if (d < 14) { b.life = 0; hurt(10); }
+      } else if (d < 14) { b.life = 0; hurt(12); }
     }
     for (const s of shots) {
       s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt;
@@ -764,6 +778,10 @@
     updateGunner(dt);
     updateEngineer(dt);
     if (M.def.update) M.def.update(dt);
+    if (M.def.meteors) {
+      M.metT = (M.metT === undefined ? 3 : M.metT) - dt;
+      if (M.metT <= 0) { M.metT = M.def.meteors / (1 + 0.25 * diff()) * rand(0.6, 1.4); spawnMeteor(); }
+    }
     updateStationCollision();
     updateAsts(dt);
     updateEnemies(dt);
@@ -957,7 +975,7 @@
       }
       ctx.closePath();
       ctx.fillStyle = a.flash > 0 ? '#59657a' : '#1a2233'; ctx.fill();
-      ctx.strokeStyle = a.flash > 0 ? '#ffffff' : C.rock; ctx.lineWidth = 2; ctx.stroke();
+      ctx.strokeStyle = a.flash > 0 ? '#ffffff' : a.fast ? '#ffa46b' : C.rock; ctx.lineWidth = a.fast ? 2.5 : 2; ctx.stroke();
       ctx.restore();
     }
 
@@ -1327,7 +1345,7 @@
 
   if (DEV) {
     window.TRINARY = {
-      get state() { return state; }, get G() { return G; }, get ship() { return ship; }, get M() { return M; }, get cross() { return cross; }, get cam() { return cam; }, get W() { return W; }, get pickups() { return pickups; },
+      get state() { return state; }, get G() { return G; }, get ship() { return ship; }, get M() { return M; }, get stats() { return stats; }, get mTime() { return mTime; }, get cross() { return cross; }, get cam() { return cam; }, get W() { return W; }, get pickups() { return pickups; },
       get counts() { return { asts: asts.length, enemies: enemies.length, bullets: bullets.length, shots: shots.length, parts: parts.length }; },
       goto(i) { G.mi = i; startMission(); },
     };
