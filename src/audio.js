@@ -49,7 +49,8 @@ const Sfx = (() => {
   return {
     init,
     laser() { tone('square', 980, 320, 0.07, 0.035); },
-    cannon() { tone('sawtooth', 420, 90, 0.14, 0.07); },
+    torpedo() { tone('sawtooth', 320, 70, 0.28, 0.09); noise(0.16, 0.08, 3200, 500); },
+    cannon() { tone('square', 900, 380, 0.06, 0.03); },
     boom(size) { noise(0.25 + size * 0.35, 0.18 + size * 0.2, 1800, 80); tone('sine', 140, 30, 0.3 + size * 0.3, 0.2); },
     shield() { tone('sine', 620, 1240, 0.12, 0.09); tone('triangle', 310, 200, 0.15, 0.06); },
     shieldDown() { tone('sawtooth', 500, 60, 0.5, 0.12); },

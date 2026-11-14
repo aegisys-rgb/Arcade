@@ -5,11 +5,12 @@ stations, one per control on the panel:
 
 | Station | Control | Does |
 |---|---|---|
-| **Pilot** | Player 1 stick | Stick flies the ship. **B1** boost, **B2** brake, **B3** nose cannon (fires where the ship points). |
-| **Gunner** | Trackball | Roll to aim the turret anywhere on screen. **Left** fires lasers (watch the heat). **Right** is the tractor beam: reels in pickups and escape pods, or reels the *ship* onto a docking beacon. |
+| **Pilot** | Player 1 stick | Stick turns the ship. **B1** thrust, **B2** retro brake, **B3** light nose cannon. The ship has momentum: it keeps drifting until you burn the other way or brake. |
+| **Gunner** | Trackball | The main gun. Roll to aim the turret anywhere on screen. **Left** fires heavy torpedoes that burst where the crosshair was (watch the heat). **Right** is the tractor beam: reels in pickups and escape pods, or reels the *ship* onto a docking beacon. |
 | **Engineer** | Player 2 stick | Stick aims the shield arc. **B1/B2/B3** route power to Engines / Weapons / Shields. **B4** hold to repair hull (drains shield). **B5** EMP blast (clears bullets, stuns enemies). **B6** cycles power. |
 
-The shield only covers part of the ship, the turret overheats, and the hull is
+The shield only covers part of the ship, breaks after a few hits and recharges
+slowly unless power is routed to it. The turret overheats, and the hull is
 shared, so the crew has to talk to each other.
 
 Six missions, then it loops harder: asteroid belt run, escape-pod rescue,
@@ -42,7 +43,7 @@ unchanged:
   the engineer. Buttons 1-6 are B1-B6. If the two are the wrong way round,
   press **F2** to swap them (it is remembered).
 - **Keyboard encoders** (I-PAC etc., MAME default keys): P1 = arrows +
-  LCtrl, LAlt, Space, LShift, Z, X. P2 = R/F/D/G + A, S, Q, W, I, K.
+  LCtrl (thrust), LAlt (brake), Space (cannon), LShift, Z, X. P2 = R/F/D/G + A, S, Q, W, I, K.
   Start = 1 or 2 (pauses during play).
 
 The title screen shows a live input check for all three stations, so you can
