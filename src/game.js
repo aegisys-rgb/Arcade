@@ -71,6 +71,7 @@
   }
   function addText(x, y, str, color) { texts.push({ x, y, str, color: color || C.white, life: 1.1 }); }
   function addScore(n, x, y) {
+    n = Math.round(n * D().score);
     G.score += n;
     if (x !== undefined) addText(x, y, '+' + n, C.eng);
   }
@@ -81,6 +82,17 @@
     Sfx.boom(size);
   }
   function diff() { return G.loop; }
+  // Crew-selected difficulty (title screen, stick left/right). HARD is the untouched tuning.
+  //   dmg: hull damage taken   drain: shield cost per hit   rocks: asteroid count
+  //   meteor: seconds between meteors   fire: enemy reload time   foes: wave size   score: score multiplier
+  const DIFFS = [
+    { name: 'EASY', dmg: 0.5, drain: 1.2, rocks: 0.55, meteor: 2.6, fire: 1.6, foes: 0.6, score: 0.5 },
+    { name: 'NORMAL', dmg: 0.75, drain: 1.6, rocks: 0.75, meteor: 1.6, fire: 1.25, foes: 0.8, score: 1 },
+    { name: 'HARD', dmg: 1, drain: 2, rocks: 1, meteor: 1, fire: 1, foes: 1, score: 1.5 },
+  ];
+  let diffIdx = 1;
+  try { const d = parseInt(localStorage.getItem('trinary.diff'), 10); if (d >= 0 && d < DIFFS.length) diffIdx = d; } catch (e) { /* storage unavailable */ }
+  const D = () => DIFFS[diffIdx];
 
   // ---------------------------------------------------------------- spawners
   function mkAst(x, y, tier, vx, vy) {
@@ -94,6 +106,7 @@
     };
   }
   function spawnAsts(n, x0, x1, safe) {
+    n = Math.round(n * D().rocks);
     for (let i = 0; i < n; i++) {
       let x, y, tries = 0;
       do { x = rand(x0, x1); y = rand(60, world.h - 60); }
@@ -154,7 +167,7 @@
   };
   const MISSIONS = [
     {
-      name: 'THE BELT', type: 'run', world: [12000, 1800], par: 80, meteors: 1.6,
+      name: 'THE BELT', type: 'run', world: [12000, 1800], par: 80, meteors: 2,
       brief: 'Cross the asteroid belt and reach the jump gate.',
       setup() {
         spawnAsts(300 + 30 * diff(), 500, 11600);
@@ -203,7 +216,7 @@
           M.waveT -= dt;
           if (M.waveT <= 0) {
             M.wave++; M.waveT = 3;
-            const f = 2 + M.wave + diff(), d = 3 + M.wave + diff();
+            const f = Math.round((2 + M.wave + diff()) * D().foes), d = Math.round((3 + M.wave + diff()) * D().foes);
             for (let i = 0; i < f; i++) spawnNear('fighter', 620, 820);
             for (let i = 0; i < d; i++) spawnNear('drone', 620, 820);
             toast = 'WAVE ' + M.wave + ' OF ' + M.waves; toastT = 2;
@@ -308,9 +321,9 @@
   function setState(s) { state = s; stateT = 0; }
   function finishMission() {
     const def = M.def;
-    const clear = 1000 * (G.mi + 1) * (1 + G.loop);
-    const hullB = Math.round(ship.hull) * 10;
-    const timeB = Math.max(0, Math.round((def.par - mTime) * 20));
+    const clear = Math.round(1000 * (G.mi + 1) * (1 + G.loop) * D().score);
+    const hullB = Math.round(ship.hull * 10 * D().score);
+    const timeB = Math.max(0, Math.round((def.par - mTime) * 20 * D().score));
     results = { clear, hullB, timeB, total: clear + hullB + timeB, time: mTime };
     G.score += results.total;
     Sfx.fanfare();
@@ -333,7 +346,7 @@
   function shieldHalf() { return 0.85; }
   function shieldBlocks(ang) { return ship.shieldOn && Math.abs(angDiff(ang, ship.shieldAng)) < shieldHalf(); }
   function absorb(dmg) {
-    ship.shield -= dmg * 2;
+    ship.shield -= dmg * D().drain;
     ship.shieldHitT = 0; ship.shieldFlash = 0.25;
     stats.absorbed += dmg;
     Sfx.shield();
@@ -341,6 +354,7 @@
   }
   function hurt(dmg) {
     if (ship.inv > 0 || state !== 'play') return;
+    dmg *= D().dmg;
     ship.hull -= dmg; ship.inv = 0.5; shake = Math.max(shake, 12);
     stats.hullLost += dmg;
     addParts(ship.x, ship.y, 14, C.bad, 220, 0.5, 3);
@@ -424,8 +438,9 @@
     let dx = p.x, dy = p.y;
     const mag = Math.hypot(dx, dy);
     ship.field = p.b[2];
-    ship.thrusting = mag > 0;
-    ship.boosting = p.b[0] && ship.boost > 0.02 && mag > 0 && !ship.field;
+    // Boost works with the stick centred too: it fires along wherever the nose is pointing.
+    ship.boosting = p.b[0] && ship.boost > 0.02 && !ship.field;
+    ship.thrusting = mag > 0 || ship.boosting;
     ship.braking = p.b[1];
     const slow = ship.field ? 0.6 : 1; // the field draws engine power: no boost, lower top speed
     if (mag > 0) {
@@ -433,6 +448,8 @@
       ship.ang = turnTo(ship.ang, Math.atan2(dy, dx), 7.5 * dt);
       const acc = 560 * slow * (ship.boosting ? 1.8 : 1);
       ship.vx += dx * acc * dt; ship.vy += dy * acc * dt;
+    } else if (ship.boosting) {
+      ship.vx += Math.cos(ship.ang) * 560 * 1.8 * dt; ship.vy += Math.sin(ship.ang) * 560 * 1.8 * dt;
     }
     if (ship.boosting) ship.boost = Math.max(0, ship.boost - dt * 0.45);
     else ship.boost = Math.min(1, ship.boost + dt * 0.16);
@@ -451,8 +468,11 @@
     ship.fieldLock = false;
     if (ship.field) {
       for (const t of pickups) {
-        if (dist(t, ship) > FIELD_R) continue;
-        const a = Math.atan2(ship.y - t.y, ship.x - t.x), pull = t.type === 'pod' ? 420 : 800;
+        const d = dist(t, ship);
+        if (d > FIELD_R) continue;
+        // a gentle tug at the rim, a hard pull up close
+        const near = 1 - d / FIELD_R, k2 = 0.08 + 0.92 * near * near;
+        const a = Math.atan2(ship.y - t.y, ship.x - t.x), pull = (t.type === 'pod' ? 900 : 1500) * k2;
         t.vx += Math.cos(a) * pull * dt; t.vy += Math.sin(a) * pull * dt;
         const k = Math.exp(-2 * dt); t.vx *= k; t.vy *= k;
         ship.fieldLock = true;
@@ -633,7 +653,7 @@
         e.ang = a;
         if (e.stun > 0) { e.stun -= dt; continue; }
         e.cd -= dt;
-        if (e.cd <= 0 && d < 760) { enemyFire(e); e.cd = 1.1 / (1 + 0.2 * diff()) + rand(0, 0.6); }
+        if (e.cd <= 0 && d < 760) { enemyFire(e); e.cd = 1.1 * D().fire / (1 + 0.2 * diff()) + rand(0, 0.6); }
         continue;
       }
       if (e.stun > 0) {
@@ -649,7 +669,7 @@
         const sp = Math.hypot(e.vx, e.vy), mx = 200 + 15 * diff();
         if (sp > mx) { e.vx *= mx / sp; e.vy *= mx / sp; }
         e.ang = a; e.cd -= dt;
-        if (e.cd <= 0 && d < 640) { enemyFire(e); e.cd = 1.3 / (1 + 0.2 * diff()) + rand(0, 0.6); }
+        if (e.cd <= 0 && d < 640) { enemyFire(e); e.cd = 1.3 * D().fire / (1 + 0.2 * diff()) + rand(0, 0.6); }
       } else if (e.type === 'mine') {
         if (d < 180) e.armed = true;
         if (e.armed) {
@@ -767,7 +787,7 @@
     if (M.def.update) M.def.update(dt);
     if (M.def.meteors) {
       M.metT = (M.metT === undefined ? 3 : M.metT) - dt;
-      if (M.metT <= 0) { M.metT = M.def.meteors / (1 + 0.25 * diff()) * rand(0.6, 1.4); spawnMeteor(); }
+      if (M.metT <= 0) { M.metT = M.def.meteors * D().meteor / (1 + 0.25 * diff()) * rand(0.6, 1.4); spawnMeteor(); }
     }
     updateStationCollision();
     updateAsts(dt);
@@ -1188,9 +1208,16 @@
     noGlow(); ctx.restore();
     txt('ONE SHIP  -  THREE STATIONS  -  ZERO MARGIN FOR ERROR', W / 2, 160, 17, C.dim);
     drawCards(200, 240, null);
-    if (Math.floor(stateT * 2) % 2) txt('PRESS ANY BUTTON TO LAUNCH', W / 2, 482, 26, C.hull);
-    txt('TOP CREWS', W / 2, 532, 16, C.eng);
-    highs.forEach((h, i) => txt((i + 1) + '.  ' + h.n + '   ' + String(h.s).padStart(7, '0'), W / 2, 558 + i * 22, 16, i === 0 ? C.white : C.dim));
+    if (Math.floor(stateT * 2) % 2) txt('PRESS ANY BUTTON TO LAUNCH', W / 2, 470, 26, C.hull);
+    txt('DIFFICULTY', W / 2 - 150, 508, 15, C.dim, 'right');
+    DIFFS.forEach((d, i) => {
+      const x = W / 2 - 80 + i * 110, on = i === diffIdx;
+      if (on) { ctx.strokeStyle = C.eng; ctx.lineWidth = 2; ctx.strokeRect(x - 48, 494, 96, 28); }
+      txt(d.name, x, 509, 16, on ? C.eng : C.dim);
+    });
+    txt('< STICK LEFT / RIGHT >', W / 2 + 290, 508, 12, C.dim, 'left');
+    txt('TOP CREWS', W / 2, 544, 15, C.eng);
+    highs.forEach((h, i) => txt((i + 1) + '.  ' + h.n + '   ' + String(h.s).padStart(7, '0'), W / 2, 566 + i * 21, 15, i === 0 ? C.white : C.dim));
     txt('Short-handed? Idle stations go on AUTO.   F2 swaps player sticks.   ESC quits.', W / 2, H - 22, 12, C.dim);
   }
   function drawBriefing() {
@@ -1258,6 +1285,12 @@
     Sfx.music(dt, state === 'play' && !paused ? 1 : 0);
     switch (state) {
       case 'title':
+        for (const pl of Input.p) {
+          const step = pl.edge.right ? 1 : pl.edge.left ? -1 : 0;
+          if (!step) continue;
+          diffIdx = clamp(diffIdx + step, 0, DIFFS.length - 1); Sfx.ui();
+          try { localStorage.setItem('trinary.diff', String(diffIdx)); } catch (e) { /* storage unavailable */ }
+        }
         if (Input.any && stateT > 0.5) { Sfx.ui(); newGame(); }
         break;
       case 'briefing':

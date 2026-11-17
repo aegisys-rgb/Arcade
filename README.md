@@ -13,6 +13,9 @@ The shield only covers part of the ship, breaks after a few hits and recharges
 slowly. The cannon overheats, the attractor field slows the ship down while it
 is on, and the hull is shared, so the crew has to talk to each other.
 
+Difficulty (Easy / Normal / Hard) is chosen on the title screen with either
+stick, left or right, and is remembered. Harder settings score more.
+
 Six missions, then it loops harder: asteroid belt run, escape-pod rescue,
 pirate ambush, docking inside a spinning station, a mined asteroid run, and a
 dreadnought boss. Any station nobody touches for a few seconds goes on AUTO
