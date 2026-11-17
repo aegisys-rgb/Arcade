@@ -1,9 +1,9 @@
 'use strict';
 /*
  * TRINARY - a three-station co-op starship game for an arcade cabinet.
- *   P1 stick   = PILOT     (turns the ship, thrust, retro brake, light nose cannon)
- *   Trackball  = GUNNER    (main gun: torpedo turret aimed anywhere, tractor beam)
- *   P2 stick   = ENGINEER  (aims the shield arc, routes power, repair, EMP)
+ *   P1 stick   = PILOT     (flies the ship, boost, brake, attractor field)
+ *   Trackball  = GUNNER    (the only weapons: rapid cannon and heavy torpedo)
+ *   P2 stick   = ENGINEER  (aims the shield arc, hull repair, emergency pulse)
  */
 (() => {
   // ---------------------------------------------------------------- basics
@@ -146,11 +146,11 @@
 
   // ---------------------------------------------------------------- missions
   const TIPS = {
-    run: ['Short burns. Momentum carries you.', 'Torpedo the rocks in our drift path.', 'The shield breaks fast. Pick your hits.'],
-    rescue: ['Brake near each pod so it can be reeled in.', 'RIGHT button: tractor-beam the pods aboard.', 'Cover the ship while it sits still.'],
-    battle: ['Keep drifting. You are the hard target.', 'You are the main gun. Lead the fighters.', 'Block incoming fire. EMP wipes bullets.'],
-    dock: ['Kill your drift, slip the gap, BRAKE in the bay.', 'Tractor the green beacon to reel us in.', 'ENGINES power for control, shield vs. mines.'],
-    boss: ['Circle it. Never stop moving.', 'Kill the 4 turrets, then the core.', 'Shield toward the dreadnought. Save EMP for bursts.'],
+    run: ['Weave through. BOOST past trouble.', 'Cannon the small rocks, torpedo the big ones.', 'The shield breaks fast. Pick your hits.'],
+    rescue: ['Fly close and hold B3. The field pulls pods in.', 'Keep the pirates off us while we collect.', 'Cover the ship while it slows down.'],
+    battle: ['Keep moving. You are the hard target.', 'Cannon the drones, torpedo the fighters.', 'Block incoming fire. Pulse when swarmed.'],
+    dock: ['Slip the gap, BRAKE in the bay. B3 reels us in.', 'Clear the mines off our approach.', 'Shield the side the mines come from.'],
+    boss: ['Circle it. Never stop moving.', 'Kill the 4 turrets, then the core.', 'Shield toward the dreadnought. Pulse the drones.'],
   };
   const MISSIONS = [
     {
@@ -168,7 +168,7 @@
     },
     {
       name: 'MAYDAY', type: 'rescue', world: [3000, 2200], par: 110, meteors: 3.5,
-      brief: 'A liner broke up out here. Tractor every escape pod aboard.',
+      brief: 'A liner broke up out here. Pull every escape pod aboard.',
       setup() {
         spawnAsts(40, 100, 2900);
         M.total = 5; M.rescued = 0; M.spawnT = 8;
@@ -283,10 +283,9 @@
     return {
       x, y, vx: 0, vy: 0, ang: 0, hull: 100, inv: 0,
       shield: 100, shieldAng: 0, shieldOn: true, shieldHitT: 9, shieldFlash: 0,
-      thrusting: false, braking: false,
-      heat: 0, overheated: false, turretCd: 0, turretAng: 0, cannonCd: 0,
-      power: 'shd', powerT: 0, emp: 0, empFx: 0, repairing: false,
-      tractor: null,
+      boost: 1, boosting: false, thrusting: false, braking: false, field: false, fieldLock: false,
+      heat: 0, overheated: false, turretCd: 0, turretAng: 0,
+      torpCd: 0, pulse: 0, pulseFx: 0, repairing: false,
     };
   }
   function newGame() {
@@ -299,7 +298,7 @@
     asts = []; enemies = []; bullets = []; shots = []; pickups = []; parts = []; texts = [];
     ship = mkShip(260, world.h / 2);
     M = { def, doneT: 0 };
-    stats = { shots: 0, hits: 0, killsGun: 0, killsPilot: 0, absorbed: 0, hullLost: 0, repaired: 0, topSpeed: 0, pods: 0 };
+    stats = { shots: 0, hits: 0, killsGun: 0, killsEng: 0, picked: 0, absorbed: 0, hullLost: 0, repaired: 0, topSpeed: 0, pods: 0 };
     mTime = 0; shake = 0; paused = false;
     cross.x = W / 2 + 160; cross.y = H / 2;
     cam.x = clamp(ship.x - W / 2, 0, world.w - W); cam.y = clamp(ship.y - H / 2, 0, world.h - H);
@@ -331,10 +330,10 @@
   }
 
   // ---------------------------------------------------------------- combat
-  function shieldHalf() { return ship.power === 'shd' ? 1.1 : 0.7; }
+  function shieldHalf() { return 0.85; }
   function shieldBlocks(ang) { return ship.shieldOn && Math.abs(angDiff(ang, ship.shieldAng)) < shieldHalf(); }
   function absorb(dmg) {
-    ship.shield -= dmg * 2.2 * (ship.power === 'shd' ? 0.75 : 1);
+    ship.shield -= dmg * 2;
     ship.shieldHitT = 0; ship.shieldFlash = 0.25;
     stats.absorbed += dmg;
     Sfx.shield();
@@ -376,7 +375,7 @@
     explode(e.x, e.y, e.type === 'boss' ? 2.2 : e.type === 'turret' ? 0.9 : 0.6, e.type === 'mine' ? C.eng : C.bad);
     if (by) {
       addScore(e.score * (1 + G.loop), e.x, e.y);
-      if (by === 'gun') stats.killsGun++; else if (by === 'pilot') stats.killsPilot++;
+      if (by === 'gun') stats.killsGun++; else if (by === 'eng') stats.killsEng++;
       const r = Math.random();
       if (e.type !== 'mine') { if (r < 0.12) mkPickup('cell', e.x, e.y); else if (r < 0.2) mkPickup('repair', e.x, e.y); }
     }
@@ -415,17 +414,31 @@
   }
 
   // ---------------------------------------------------------------- crew stations
+  const FIELD_R = 330;                    // pilot's attractor field radius
+  const TORP_SPEED = 620, TORP_BLAST = 95, TORP_RELOAD = 1.6;
+  const PULSE_R = 300, PULSE_CD = 30;     // engineer's emergency pulse
+
+  // PILOT: point the stick to fly that way. No weapons - boost, brake and the attractor field.
   function updatePilot(dt) {
     const p = Input.p[0];
-    const eng = ship.power === 'eng' ? 1.35 : 1;
-    // Asteroids-style flight: the stick only turns the ship, B1 fires the main engine,
-    // and the ship keeps drifting in a straight line until something pushes back.
-    if (p.x || p.y) ship.ang = turnTo(ship.ang, Math.atan2(p.y, p.x), 6 * eng * dt);
-    ship.thrusting = p.b[0];
+    let dx = p.x, dy = p.y;
+    const mag = Math.hypot(dx, dy);
+    ship.field = p.b[2];
+    ship.thrusting = mag > 0;
+    ship.boosting = p.b[0] && ship.boost > 0.02 && mag > 0 && !ship.field;
     ship.braking = p.b[1];
-    if (ship.thrusting) { ship.vx += Math.cos(ship.ang) * 430 * eng * dt; ship.vy += Math.sin(ship.ang) * 430 * eng * dt; }
-    if (ship.braking) { const k = Math.exp(-1.8 * eng * dt); ship.vx *= k; ship.vy *= k; }
-    const maxV = 430 * eng, v = Math.hypot(ship.vx, ship.vy);
+    const slow = ship.field ? 0.6 : 1; // the field draws engine power: no boost, lower top speed
+    if (mag > 0) {
+      dx /= mag; dy /= mag;
+      ship.ang = turnTo(ship.ang, Math.atan2(dy, dx), 7.5 * dt);
+      const acc = 560 * slow * (ship.boosting ? 1.8 : 1);
+      ship.vx += dx * acc * dt; ship.vy += dy * acc * dt;
+    }
+    if (ship.boosting) ship.boost = Math.max(0, ship.boost - dt * 0.45);
+    else ship.boost = Math.min(1, ship.boost + dt * 0.16);
+    const drag = Math.exp(-(ship.braking ? 4 : 0.85) * dt);
+    ship.vx *= drag; ship.vy *= drag;
+    const maxV = 320 * slow * (ship.boosting ? 1.6 : 1), v = Math.hypot(ship.vx, ship.vy);
     if (v > maxV) { const k = lerp(1, maxV / v, Math.min(1, dt * 6)); ship.vx *= k; ship.vy *= k; }
     stats.topSpeed = Math.max(stats.topSpeed, v);
     ship.x += ship.vx * dt; ship.y += ship.vy * dt;
@@ -434,16 +447,24 @@
     if (ship.x > world.w - 20) { ship.x = world.w - 20; ship.vx = -Math.abs(ship.vx) * 0.4; }
     if (ship.y > world.h - 20) { ship.y = world.h - 20; ship.vy = -Math.abs(ship.vy) * 0.4; }
 
-    // nose cannon
-    ship.cannonCd -= dt;
-    if (p.b[2] && ship.cannonCd <= 0) {
-      ship.cannonCd = 0.3;
-      const dmg = ship.power === 'wep' ? 1.5 : 1; // light pea-shooter; the turret is the main gun
-      for (const s of [-1, 1]) {
-        playerShot(ship.x + Math.cos(ship.ang) * 14 + Math.cos(ship.ang + Math.PI / 2) * 7 * s,
-          ship.y + Math.sin(ship.ang) * 14 + Math.sin(ship.ang + Math.PI / 2) * 7 * s, ship.ang, 760, dmg, 'pilot', 0.55);
+    // attractor field: pulls every helpful object in range toward the ship
+    ship.fieldLock = false;
+    if (ship.field) {
+      for (const t of pickups) {
+        if (dist(t, ship) > FIELD_R) continue;
+        const a = Math.atan2(ship.y - t.y, ship.x - t.x), pull = t.type === 'pod' ? 420 : 800;
+        t.vx += Math.cos(a) * pull * dt; t.vy += Math.sin(a) * pull * dt;
+        const k = Math.exp(-2 * dt); t.vx *= k; t.vy *= k;
+        ship.fieldLock = true;
       }
-      Sfx.cannon();
+      const s = M.station;
+      if (s && dist(s, ship) < FIELD_R) {
+        // near the station the field grabs the docking beacon and reels the SHIP in
+        const a = Math.atan2(s.y - ship.y, s.x - ship.x);
+        ship.vx += Math.cos(a) * 230 * dt; ship.vy += Math.sin(a) * 230 * dt;
+        const k = Math.exp(-1.2 * dt); ship.vx *= k; ship.vy *= k;
+        ship.fieldLock = true;
+      }
     }
     // engine trail
     if (ship.thrusting && parts.length < 650) {
@@ -451,35 +472,28 @@
       parts.push({
         x: ship.x + Math.cos(back) * 14, y: ship.y + Math.sin(back) * 14,
         vx: Math.cos(back) * 160 + rand(-30, 30) + ship.vx * 0.3, vy: Math.sin(back) * 160 + rand(-30, 30) + ship.vy * 0.3,
-        life: 0.35, max: 0.45, color: Math.random() < 0.3 ? '#ffffff' : C.pilot, size: 3.5,
+        life: ship.boosting ? 0.45 : 0.25, max: 0.45, color: ship.boosting ? '#ffffff' : C.pilot, size: ship.boosting ? 4 : 2.5,
       });
     }
   }
 
-  function tractorRange() { return ship.power === 'wep' ? 620 : 480; }
-  function findTractorTarget(ax, ay) {
-    let best = null, bd = 85;
-    const range = tractorRange();
-    for (const p of pickups) {
-      const d = Math.hypot(p.x - ax, p.y - ay);
-      if (d < bd && dist(p, ship) < range) { bd = d; best = p; }
-    }
-    const s = M.station;
-    if (s && Math.hypot(s.x - ax, s.y - ay) < bd && dist(s, ship) < range) best = s;
-    return best;
-  }
-  const TORP_SPEED = 720, TORP_BLAST = 78;
-  // The turret is the ship's main gun: slow, heavy torpedoes that burst where the crosshair was.
-  function fireTurret(ax, ay, rateMul) {
+  // GUNNER: the only station with weapons. Left = rapid cannon, right = slow heavy torpedo.
+  function fireCannon(ax, ay, rateMul) {
     if (ship.turretCd > 0 || ship.overheated) return;
-    const wep = ship.power === 'wep';
-    ship.turretCd = (wep ? 0.38 : 0.55) / rateMul;
-    ship.heat += wep ? 0.18 : 0.26;
+    ship.turretCd = 0.12 / rateMul;
+    ship.heat += 0.06;
     if (ship.heat >= 1) { ship.heat = 1; ship.overheated = true; Sfx.overheat(); addText(ship.x, ship.y - 60, 'OVERHEAT', C.gun); }
+    const a = Math.atan2(ay - ship.y, ax - ship.x) + rand(-0.025, 0.025);
+    playerShot(ship.x + Math.cos(a) * 18, ship.y + Math.sin(a) * 18, a, 950, 1.5, 'gun', 0.7);
+    Sfx.laser();
+  }
+  function fireTorpedo(ax, ay, reloadMul) {
+    if (ship.torpCd > 0) return;
+    ship.torpCd = TORP_RELOAD * reloadMul;
     const a = Math.atan2(ay - ship.y, ax - ship.x), d = Math.hypot(ax - ship.x, ay - ship.y);
     shots.push({
       x: ship.x + Math.cos(a) * 18, y: ship.y + Math.sin(a) * 18, vx: Math.cos(a) * TORP_SPEED, vy: Math.sin(a) * TORP_SPEED,
-      dmg: 6, by: 'gun', torp: true, life: clamp((d - 18) / TORP_SPEED, 0.08, 0.95),
+      dmg: 8, by: 'gun', torp: true, life: clamp((d - 18) / TORP_SPEED, 0.08, 1.1),
     });
     stats.shots++;
     Sfx.torpedo();
@@ -487,10 +501,10 @@
   // Torpedo burst: splash damage to everything nearby except the thing it hit directly.
   function detonate(s, direct) {
     let n = 0;
-    explode(s.x, s.y, 0.45, C.gun);
+    explode(s.x, s.y, 0.55, C.gun);
     parts.push({ x: s.x, y: s.y, vx: 0, vy: 0, life: 0.22, max: 0.22, color: C.gun, size: TORP_BLAST, ring: true });
-    for (const e of enemies.slice()) if (e !== direct && !e.dead && Math.hypot(e.x - s.x, e.y - s.y) < TORP_BLAST + e.r) { damageEnemy(e, 3, 'gun'); n++; }
-    for (const a of asts.slice()) if (a !== direct && !a.dead && Math.hypot(a.x - s.x, a.y - s.y) < TORP_BLAST + a.r) { damageAst(a, 3, 'gun'); n++; }
+    for (const e of enemies.slice()) if (e !== direct && !e.dead && Math.hypot(e.x - s.x, e.y - s.y) < TORP_BLAST + e.r) { damageEnemy(e, 4, 'gun'); n++; }
+    for (const a of asts.slice()) if (a !== direct && !a.dead && Math.hypot(a.x - s.x, a.y - s.y) < TORP_BLAST + a.r) { damageAst(a, 4, 'gun'); n++; }
     if (!direct && n) stats.hits++;
   }
   function updateGunner(dt) {
@@ -498,52 +512,37 @@
     if (m.active) { gunIdle = 0; } else gunIdle += dt;
     gunAuto = gunIdle > 6;
     ship.turretCd -= dt;
-    ship.heat = Math.max(0, ship.heat - dt * (ship.power === 'wep' ? 0.42 : 0.3));
+    ship.torpCd = Math.max(0, ship.torpCd - dt);
+    ship.heat = Math.max(0, ship.heat - dt * 0.3);
     if (ship.overheated && ship.heat < 0.35) ship.overheated = false;
-    let fire = false, tractor = false, rate = 1;
+    let fire = false, torp = false, rate = 1;
 
     if (!gunAuto) {
       if (m.locked) { cross.x += m.dx * (H / innerHeight); cross.y += m.dy * (H / innerHeight); }
       else if (m.moved) { cross.x = m.ax * (W / innerWidth); cross.y = m.ay * (H / innerHeight); }
-      fire = m.left; tractor = m.right;
+      fire = m.left; torp = m.right;
     } else {
-      // Auto-gunner: slower, short-sighted, but keeps a 1-2 player crew alive.
-      let tgt = null, bd = 520;
-      for (const e of enemies) { if (e.dormant) continue; const d = dist(e, ship); if (d < bd && !(e.type === 'boss' && turretsAlive())) { bd = d; tgt = e; } }
+      // Auto-gunner: slow to aim and fire. A stopgap, not a substitute for a player.
+      let tgt = null, bd = 520, isEnemy = false;
+      for (const e of enemies) { if (e.dormant) continue; const d = dist(e, ship); if (d < bd && !(e.type === 'boss' && turretsAlive())) { bd = d; tgt = e; isEnemy = true; } }
       if (!tgt) { bd = 190; for (const a of asts) { const d = dist(a, ship) - a.r; if (d < bd) { bd = d; tgt = a; } } }
-      let pk = null;
-      if (!tgt) { bd = tractorRange() - 20; for (const p of pickups) { const d = dist(p, ship); if (d < bd) { bd = d; pk = p; } } }
-      const goal = tgt || pk;
-      const lead = tgt ? dist(tgt, ship) / TORP_SPEED : 0; // aim where the target will be
-      const gx = goal ? goal.x + goal.vx * lead - cam.x : ship.x - cam.x + Math.cos(ship.ang) * 150;
-      const gy = goal ? goal.y + goal.vy * lead - cam.y : ship.y - cam.y + Math.sin(ship.ang) * 150;
+      const lead = tgt ? dist(tgt, ship) / 950 : 0; // aim where the target will be
+      const gx = tgt ? tgt.x + tgt.vx * lead - cam.x : ship.x - cam.x + Math.cos(ship.ang) * 150;
+      const gy = tgt ? tgt.y + tgt.vy * lead - cam.y : ship.y - cam.y + Math.sin(ship.ang) * 150;
       cross.x = lerp(cross.x, gx, Math.min(1, dt * 4)); cross.y = lerp(cross.y, gy, Math.min(1, dt * 4));
-      fire = !!tgt && Math.hypot(cross.x - gx, cross.y - gy) < 30 && ship.heat < 0.7;
-      tractor = !!pk;
+      const onTarget = !!tgt && Math.hypot(cross.x - gx, cross.y - gy) < 30;
+      fire = onTarget && ship.heat < 0.7;
+      torp = onTarget && isEnemy;
       rate = 0.4;
     }
     cross.x = clamp(cross.x, 8, W - 8); cross.y = clamp(cross.y, 8, H - 8);
     const ax = cross.x + cam.x, ay = cross.y + cam.y;
     ship.turretAng = Math.atan2(ay - ship.y, ax - ship.x);
-    if (fire) fireTurret(ax, ay, rate);
-
-    ship.tractor = tractor ? findTractorTarget(ax, ay) : null;
-    ship.tractorOn = tractor;
-    const t = ship.tractor;
-    if (t) {
-      const a = Math.atan2(ship.y - t.y, ship.x - t.x);
-      if (t === M.station) {
-        // Reel the SHIP toward the docking beacon.
-        ship.vx -= Math.cos(a) * 230 * dt; ship.vy -= Math.sin(a) * 230 * dt;
-        const k = Math.exp(-1.2 * dt); ship.vx *= k; ship.vy *= k;
-      } else {
-        const pull = t.type === 'pod' ? 420 : 800;
-        t.vx += Math.cos(a) * pull * dt; t.vy += Math.sin(a) * pull * dt;
-        const k = Math.exp(-2 * dt); t.vx *= k; t.vy *= k;
-      }
-    }
+    if (fire) fireCannon(ax, ay, rate);
+    if (torp) fireTorpedo(ax, ay, gunAuto ? 2.5 : 1);
   }
 
+  // ENGINEER: shield arc, hull repair, and the emergency pulse.
   function nearestThreatAngle() {
     let best = null, bs = 1e9;
     for (const b of bullets) { const d = dist(b, ship); if (d < 340 && d < bs) { bs = d; best = b; } }
@@ -551,24 +550,17 @@
     for (const a of asts) { const d = (dist(a, ship) - a.r) * 1.6; if (d < 330 && d < bs) { bs = d; best = a; } }
     return best ? Math.atan2(best.y - ship.y, best.x - ship.x) : null;
   }
-  function setPower(p) {
-    if (ship.power === p) return;
-    ship.power = p; ship.powerT = 0.4; Sfx.power();
-    addText(ship.x, ship.y - 60, 'POWER > ' + { eng: 'ENGINES', wep: 'WEAPONS', shd: 'SHIELDS' }[p], C.eng);
-  }
-  function fireEmp() {
-    if (ship.emp > 0) return;
-    ship.emp = 18; ship.empFx = 0.5; Sfx.emp(); shake = Math.max(shake, 8);
-    const R = 320;
-    for (const b of bullets) if (dist(b, ship) < R) { b.life = 0; addParts(b.x, b.y, 3, C.eng, 80, 0.3, 2); }
-    for (const e of enemies) {
-      if (e.dormant || dist(e, ship) > R + e.r) continue;
-      e.stun = 2.5;
-      if (e.type === 'mine' || e.type === 'drone') damageEnemy(e, 2, 'eng');
-    }
+  // A shockwave that does heavy damage to everything around the ship. Long cooldown.
+  function firePulse() {
+    if (ship.pulse > 0) return;
+    ship.pulse = PULSE_CD; ship.pulseFx = 0.5; Sfx.emp(); Sfx.boom(1); shake = Math.max(shake, 18);
+    for (const b of bullets) if (dist(b, ship) < PULSE_R) { b.life = 0; addParts(b.x, b.y, 3, C.eng, 80, 0.3, 2); }
+    for (const e of enemies.slice()) if (!e.dead && dist(e, ship) < PULSE_R + e.r) damageEnemy(e, 12, 'eng');
+    for (const a of asts.slice()) if (!a.dead && dist(a, ship) < PULSE_R + a.r) damageAst(a, 12, 'eng');
+    // whatever rubble is left gets thrown clear
     for (const a of asts) {
-      const d = dist(a, ship);
-      if (d < R) { const an = Math.atan2(a.y - ship.y, a.x - ship.x); a.vx += Math.cos(an) * 200; a.vy += Math.sin(an) * 200; }
+      if (a.dead || dist(a, ship) > PULSE_R + a.r) continue;
+      const an = Math.atan2(a.y - ship.y, a.x - ship.x); a.vx += Math.cos(an) * 260; a.vy += Math.sin(an) * 260;
     }
   }
   function updateEngineer(dt) {
@@ -578,15 +570,11 @@
     ship.repairing = false;
     if (!engAuto) {
       if (p.x || p.y) ship.shieldAng = turnTo(ship.shieldAng, Math.atan2(p.y, p.x), 9 * dt);
-      if (p.pressed[0]) setPower('eng');
-      if (p.pressed[1]) setPower('wep');
-      if (p.pressed[2]) setPower('shd');
-      if (p.b[3]) ship.repairing = true;
-      if (p.pressed[4]) fireEmp();
-      if (p.pressed[5]) setPower({ eng: 'wep', wep: 'shd', shd: 'eng' }[ship.power]);
+      if (p.b[0]) ship.repairing = true;
+      if (p.pressed[1]) firePulse();
     } else {
       const a = nearestThreatAngle();
-      // Deliberately sluggish: it never repairs or fires the EMP, and it turns too slowly to cover two threats.
+      // Deliberately sluggish: it never repairs or fires the pulse, and it turns too slowly to cover two threats.
       if (a !== null) ship.shieldAng = turnTo(ship.shieldAng, a, 1.6 * dt);
     }
     if (ship.repairing && ship.shield > 4 && ship.hull < 100 && ship.shieldOn) {
@@ -596,12 +584,11 @@
       if (Math.random() < dt * 14) addParts(ship.x + rand(-12, 12), ship.y + rand(-12, 12), 1, C.hull, 40, 0.5, 2.5);
     } else ship.repairing = false;
     ship.shieldHitT += dt;
-    const shd = ship.power === 'shd'; // slow to come back unless the engineer feeds it
-    if (ship.shieldHitT > (shd ? 1.5 : 3.5) && !ship.repairing) ship.shield = Math.min(100, ship.shield + dt * (shd ? 14 : 4.5));
+    // the shield waits a few seconds after the last hit, then comes back slowly
+    if (ship.shieldHitT > 3 && !ship.repairing) ship.shield = Math.min(100, ship.shield + dt * 6);
     if (!ship.shieldOn && ship.shield >= 40) { ship.shieldOn = true; Sfx.shieldUp(); }
-    ship.emp = Math.max(0, ship.emp - dt);
-    ship.empFx = Math.max(0, ship.empFx - dt);
-    ship.powerT = Math.max(0, ship.powerT - dt);
+    ship.pulse = Math.max(0, ship.pulse - dt);
+    ship.pulseFx = Math.max(0, ship.pulseFx - dt);
     ship.shieldFlash = Math.max(0, ship.shieldFlash - dt);
   }
 
@@ -745,8 +732,8 @@
       const k = Math.exp(-0.6 * dt); p.vx *= k; p.vy *= k;
       p.x = clamp(p.x, 20, world.w - 20); p.y = clamp(p.y, 20, world.h - 20);
       if (dist(p, ship) < 30 + p.r) {
-        p.life = 0; Sfx.pickup();
-        if (p.type === 'cell') { ship.shield = Math.min(100, ship.shield + 40); addText(p.x, p.y, 'ENERGY', C.eng); }
+        p.life = 0; Sfx.pickup(); stats.picked++;
+        if (p.type === 'cell') { ship.shield = Math.min(100, ship.shield + 40); ship.boost = 1; addText(p.x, p.y, 'ENERGY', C.eng); }
         else if (p.type === 'repair') { ship.hull = Math.min(100, ship.hull + 25); addText(p.x, p.y, 'HULL +25', C.hull); }
         else if (p.type === 'crystal') addScore(150, p.x, p.y);
         else if (p.type === 'pod') { M.rescued++; stats.pods++; addScore(500, p.x, p.y); addText(p.x, p.y - 22, 'POD ABOARD', C.hull); }
@@ -878,19 +865,12 @@
       ctx.setLineDash([]);
     }
     ctx.globalAlpha = 1;
-    // drift marker: shows where momentum is carrying the ship, which is not always where it points
-    const dv = Math.hypot(ship.vx, ship.vy);
-    if (dv > 40) {
-      const da = Math.atan2(ship.vy, ship.vx), dl = 58 + dv * 0.09;
-      ctx.strokeStyle = C.pilot; ctx.globalAlpha = 0.55; ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(da - 0.16) * (dl - 9), Math.sin(da - 0.16) * (dl - 9)); ctx.lineTo(Math.cos(da) * dl, Math.sin(da) * dl);
-      ctx.lineTo(Math.cos(da + 0.16) * (dl - 9), Math.sin(da + 0.16) * (dl - 9)); ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-    if (ship.empFx > 0) {
-      ctx.strokeStyle = C.eng; ctx.lineWidth = 4; ctx.globalAlpha = ship.empFx * 2;
-      ctx.beginPath(); ctx.arc(0, 0, 320 * (1 - ship.empFx * 2 + 0.02), 0, TAU); ctx.stroke();
+    if (ship.pulseFx > 0) {
+      const k = 1 - ship.pulseFx * 2; // 0 -> 1 as the shockwave expands
+      ctx.fillStyle = C.eng; ctx.globalAlpha = (1 - k) * 0.25;
+      ctx.beginPath(); ctx.arc(0, 0, PULSE_R * (k + 0.05), 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 8 * (1 - k) + 2; ctx.globalAlpha = 1 - k; glow(C.eng, 24);
+      ctx.beginPath(); ctx.arc(0, 0, PULSE_R * (k + 0.05), 0, TAU); ctx.stroke(); noGlow();
       ctx.globalAlpha = 1;
     }
     if (!blink) {
@@ -1003,16 +983,17 @@
       if (p.type === 'pod') txt('SOS', p.x, p.y - 24, 11, C.white, 'center', 0.5 + 0.5 * Math.sin(p.t * 5));
     }
 
-    // tractor beam
-    if (ship.tractorOn) {
-      const t = ship.tractor;
-      const tx = t ? t.x : cross.x + cam.x, ty = t ? t.y : cross.y + cam.y;
-      ctx.strokeStyle = t ? C.hull : 'rgba(109,255,138,0.25)';
-      ctx.lineWidth = t ? 3 + Math.sin(stateT * 30) * 1.5 : 1.5;
-      if (t) glow(C.hull, 12);
-      ctx.setLineDash([10, 6]); ctx.lineDashOffset = stateT * 80;
-      ctx.beginPath(); ctx.moveTo(ship.x, ship.y); ctx.lineTo(tx, ty); ctx.stroke();
-      ctx.setLineDash([]); noGlow();
+    // attractor field
+    if (ship.field && state !== 'gameover') {
+      ctx.strokeStyle = C.hull; ctx.lineWidth = 2;
+      for (let i = 0; i < 3; i++) {
+        const k = 1 - ((stateT * 0.9 + i / 3) % 1); // rings collapse inward
+        ctx.globalAlpha = (ship.fieldLock ? 0.55 : 0.25) * (1 - k * 0.5);
+        ctx.beginPath(); ctx.arc(ship.x, ship.y, 46 + (FIELD_R - 46) * k, 0, TAU); ctx.stroke();
+      }
+      ctx.globalAlpha = 0.5; ctx.setLineDash([6, 10]);
+      ctx.beginPath(); ctx.arc(ship.x, ship.y, FIELD_R, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
     }
 
     // enemies
@@ -1127,27 +1108,20 @@
     };
     // pilot
     let x = panel(30 + pw / 2, C.pilot, 'PILOT', false);
+    if (ship.field) txt(ship.fieldLock ? 'FIELD PULLING' : 'FIELD ON', x + pw - 10, py + 14, 12, C.hull, 'right');
+    bar(x + 10, py + 28, pw - 20, 16, ship.boost, C.pilot, 'BOOST');
     const sp = Math.hypot(ship.vx, ship.vy);
-    bar(x + 10, py + 28, pw - 20, 16, sp / 580, sp < 70 ? C.hull : C.pilot, 'SPEED ' + Math.round(sp));
-    txt(ship.thrusting ? 'MAIN ENGINE' : ship.braking ? 'RETRO BRAKE' : sp > 15 ? 'DRIFTING' : 'HOLDING', x + 10, py + 61, 13, ship.thrusting ? C.pilot : ship.braking ? C.eng : C.dim, 'left');
+    bar(x + 10, py + 52, pw - 20, 16, sp / 520, sp < 70 ? C.hull : C.pilot, 'SPEED ' + Math.round(sp));
     // gunner
     x = panel(W / 2, C.gun, 'GUNNER', gunAuto);
-    bar(x + 10, py + 28, pw - 20, 16, ship.heat, C.gun, ship.overheated ? 'OVERHEAT!' : 'HEAT', ship.overheated);
-    txt(ship.tractor ? 'TRACTOR LOCKED' : ship.tractorOn ? 'TRACTOR: NO TARGET' : 'TRACTOR READY', x + 10, py + 61, 13, ship.tractor ? C.hull : C.dim, 'left');
+    bar(x + 10, py + 28, pw - 20, 16, ship.heat, C.gun, ship.overheated ? 'CANNON OVERHEAT!' : 'CANNON HEAT', ship.overheated);
+    bar(x + 10, py + 52, pw - 20, 16, 1 - ship.torpCd / TORP_RELOAD, ship.torpCd <= 0 ? C.white : C.gun, ship.torpCd <= 0 ? 'TORPEDO READY' : 'TORPEDO LOADING');
     // engineer
     x = panel(W - 30 - pw / 2, C.eng, 'ENGINEER', engAuto);
+    if (ship.repairing) txt('REPAIRING', x + pw - 10, py + 14, 12, C.hull, 'right');
     bar(x + 10, py + 28, pw - 20, 16, ship.shield / 100, C.eng, ship.shieldOn ? 'SHIELD' : 'SHIELD OFFLINE', !ship.shieldOn);
-    const bw = (pw - 20 - 70) / 3 - 4;
-    [['eng', 'ENG'], ['wep', 'WEP'], ['shd', 'SHD']].forEach(([k, lab], i) => {
-      const bx = x + 10 + i * (bw + 4), on = ship.power === k;
-      ctx.fillStyle = on ? C.eng : 'rgba(10,18,32,0.75)'; ctx.fillRect(bx, py + 52, bw, 18);
-      ctx.strokeStyle = C.eng; ctx.lineWidth = 1.5; ctx.strokeRect(bx, py + 52, bw, 18);
-      txt(lab, bx + bw / 2, py + 62, 12, on ? '#04101c' : C.eng);
-    });
-    const ex = x + pw - 10 - 62;
-    ctx.fillStyle = ship.emp <= 0 ? (Math.floor(stateT * 3) % 2 ? C.white : C.eng) : 'rgba(10,18,32,0.75)';
-    ctx.fillRect(ex, py + 52, 62, 18); ctx.strokeStyle = C.eng; ctx.strokeRect(ex, py + 52, 62, 18);
-    txt(ship.emp <= 0 ? 'EMP' : 'EMP ' + Math.ceil(ship.emp), ex + 31, py + 62, 12, ship.emp <= 0 ? '#04101c' : C.dim);
+    const ready = ship.pulse <= 0;
+    bar(x + 10, py + 52, pw - 20, 16, 1 - ship.pulse / PULSE_CD, ready && Math.floor(stateT * 3) % 2 ? C.white : C.eng, ready ? 'PULSE READY' : 'PULSE ' + Math.ceil(ship.pulse) + 's');
 
     if (toastT > 0) txt(toast, W / 2, 150, 34, C.eng, 'center', clamp(toastT, 0, 1));
     if (M.doneT > 0) txt('MISSION COMPLETE', W / 2, H / 2 - 110, 44, C.hull);
@@ -1161,9 +1135,9 @@
 
   // ---------------------------------------------------------------- screens
   const ROLE = [
-    { name: 'PILOT', dev: 'PLAYER 1 STICK', color: C.pilot, lines: ['STICK  turn the ship', 'B1  thrust (you keep drifting)', 'B2  retro brake', 'B3  light nose cannon'] },
-    { name: 'GUNNER', dev: 'TRACKBALL', color: C.gun, lines: ['ROLL  aim the turret', 'LEFT  fire torpedoes', 'RIGHT  tractor beam', 'they burst at the crosshair'] },
-    { name: 'ENGINEER', dev: 'PLAYER 2 STICK', color: C.eng, lines: ['STICK  aim the shield', 'B1 B2 B3  power: ENG WEP SHD', 'B4  hold to repair hull', 'B5  EMP blast'] },
+    { name: 'PILOT', dev: 'PLAYER 1 STICK', color: C.pilot, lines: ['STICK  fly the ship', 'B1  boost', 'B2  brake', 'B3  hold: attractor field'] },
+    { name: 'GUNNER', dev: 'TRACKBALL', color: C.gun, lines: ['ROLL  aim the turret', 'LEFT  rapid cannon', 'RIGHT  heavy torpedo', 'the only guns on the ship'] },
+    { name: 'ENGINEER', dev: 'PLAYER 2 STICK', color: C.eng, lines: ['STICK  aim the shield', 'B1  hold to repair hull', 'B2  emergency pulse', 'pulse: big blast, long recharge'] },
   ];
   function drawCards(y, h, tips) {
     const cw = Math.min(360, (W - 80) / 3 - 16);
@@ -1237,9 +1211,9 @@
     txt(M.def.name + '   ' + results.time.toFixed(1) + 's', W / 2, 138, 18, C.dim);
     const acc = stats.shots ? Math.round(100 * stats.hits / stats.shots) : 0;
     const tips = [
-      ['TOP SPEED  ' + Math.round(stats.topSpeed), 'CANNON KILLS  ' + stats.killsPilot, 'HULL LOST  ' + Math.round(stats.hullLost)],
+      ['TOP SPEED  ' + Math.round(stats.topSpeed), 'PICKUPS  ' + stats.picked, 'HULL LOST  ' + Math.round(stats.hullLost)],
       ['TURRET KILLS  ' + stats.killsGun, 'ACCURACY  ' + acc + '%', 'PODS RESCUED  ' + stats.pods],
-      ['DAMAGE BLOCKED  ' + Math.round(stats.absorbed), 'HULL REPAIRED  ' + Math.round(stats.repaired)],
+      ['DAMAGE BLOCKED  ' + Math.round(stats.absorbed), 'HULL REPAIRED  ' + Math.round(stats.repaired), 'PULSE KILLS  ' + stats.killsEng],
     ];
     drawCards(180, 170, tips);
     const rows = [['MISSION CLEAR', results.clear], ['HULL BONUS', results.hullB], ['TIME BONUS', results.timeB]];

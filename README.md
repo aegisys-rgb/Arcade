@@ -5,13 +5,13 @@ stations, one per control on the panel:
 
 | Station | Control | Does |
 |---|---|---|
-| **Pilot** | Player 1 stick | Stick turns the ship. **B1** thrust, **B2** retro brake, **B3** light nose cannon. The ship has momentum: it keeps drifting until you burn the other way or brake. |
-| **Gunner** | Trackball | The main gun. Roll to aim the turret anywhere on screen. **Left** fires heavy torpedoes that burst where the crosshair was (watch the heat). **Right** is the tractor beam: reels in pickups and escape pods, or reels the *ship* onto a docking beacon. |
-| **Engineer** | Player 2 stick | Stick aims the shield arc. **B1/B2/B3** route power to Engines / Weapons / Shields. **B4** hold to repair hull (drains shield). **B5** EMP blast (clears bullets, stuns enemies). **B6** cycles power. |
+| **Pilot** | Player 1 stick | Point the stick to fly that way. **B1** boost (limited, recharges), **B2** brake, **B3** hold for the attractor field: pulls pickups and escape pods toward the ship, and reels the ship onto the docking beacon. No weapons. |
+| **Gunner** | Trackball | The only weapons on the ship. Roll to aim anywhere on screen. **Left** is a rapid cannon (weak, overheats if held). **Right** is a heavy torpedo that bursts where the crosshair was, with a slow reload. |
+| **Engineer** | Player 2 stick | Stick aims the shield arc. **B1** hold to repair hull (drains shield). **B2** emergency pulse: a shockwave that heavily damages everything around the ship, with a 30 second recharge. |
 
 The shield only covers part of the ship, breaks after a few hits and recharges
-slowly unless power is routed to it. The turret overheats, and the hull is
-shared, so the crew has to talk to each other.
+slowly. The cannon overheats, the attractor field slows the ship down while it
+is on, and the hull is shared, so the crew has to talk to each other.
 
 Six missions, then it loops harder: asteroid belt run, escape-pod rescue,
 pirate ambush, docking inside a spinning station, a mined asteroid run, and a
@@ -43,7 +43,7 @@ unchanged:
   the engineer. Buttons 1-6 are B1-B6. If the two are the wrong way round,
   press **F2** to swap them (it is remembered).
 - **Keyboard encoders** (I-PAC etc., MAME default keys): P1 = arrows +
-  LCtrl (thrust), LAlt (brake), Space (cannon), LShift, Z, X. P2 = R/F/D/G + A, S, Q, W, I, K.
+  LCtrl (boost), LAlt (brake), Space (attractor field), LShift, Z, X. P2 = R/F/D/G + A (repair), S (pulse), Q, W, I, K.
   Start = 1 or 2 (pauses during play).
 
 The title screen shows a live input check for all three stations, so you can
