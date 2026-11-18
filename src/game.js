@@ -13,7 +13,9 @@
   const ctx = cv.getContext('2d');
   const TAU = Math.PI * 2;
   const DEV = /[?&]dev\b/.test(location.search);
-  // Which player stick runs which station (0 = Player 1 stick, 1 = Player 2 stick).
+  // Which input device runs which station (0 = first controller / P1 keys, 1 = second controller / P2 keys).
+  // On screen the pilot is always on the left and the engineer on the right; this only changes which
+  // device drives them. Swap the two numbers if the sticks feel backwards on your cabinet.
   const PILOT_STICK = 1, ENGINEER_STICK = 0;
 
   const rand = (a, b) => a + Math.random() * (b - a);
@@ -1118,7 +1120,7 @@
     txt('MISSION ' + (G.mi + 1) + (G.loop ? '  LOOP ' + (G.loop + 1) : '') + '  -  ' + M.def.name, W / 2, 54, 12, C.dim);
     txt(String(G.score).padStart(7, '0'), W - 24, 30, 26, C.white, 'right');
 
-    // station panels: laid out like the control panel (P1 stick left, trackball centre, P2 stick right)
+    // station panels: laid out like the control panel (left stick, trackball centre, right stick)
     const pw = Math.min(300, (W - 60) / 3 - 10), py = H - 92, ph = 80;
     const panel = (cx, color, title, auto) => {
       const x = cx - pw / 2;
@@ -1129,8 +1131,7 @@
       return x;
     };
     // pilot
-    const side = (stick) => (stick === 0 ? 30 + pw / 2 : W - 30 - pw / 2);
-    let x = panel(side(PILOT_STICK), C.pilot, 'PILOT', false);
+    let x = panel(30 + pw / 2, C.pilot, 'PILOT', false);
     if (ship.field) txt(ship.fieldLock ? 'FIELD PULLING' : 'FIELD ON', x + pw - 10, py + 14, 12, C.hull, 'right');
     bar(x + 10, py + 28, pw - 20, 16, ship.boost, C.pilot, 'BOOST');
     const sp = Math.hypot(ship.vx, ship.vy);
@@ -1140,7 +1141,7 @@
     bar(x + 10, py + 28, pw - 20, 16, ship.heat, C.gun, ship.overheated ? 'CANNON OVERHEAT!' : 'CANNON HEAT', ship.overheated);
     bar(x + 10, py + 52, pw - 20, 16, 1 - ship.torpCd / TORP_RELOAD, ship.torpCd <= 0 ? C.white : C.gun, ship.torpCd <= 0 ? 'TORPEDO READY' : 'TORPEDO LOADING');
     // engineer
-    x = panel(side(ENGINEER_STICK), C.eng, 'ENGINEER', engAuto);
+    x = panel(W - 30 - pw / 2, C.eng, 'ENGINEER', engAuto);
     if (ship.repairing) txt('REPAIRING', x + pw - 10, py + 14, 12, C.hull, 'right');
     bar(x + 10, py + 28, pw - 20, 16, ship.shield / 100, C.eng, ship.shieldOn ? 'SHIELD' : 'SHIELD OFFLINE', !ship.shieldOn);
     const ready = ship.pulse <= 0;
@@ -1158,15 +1159,14 @@
 
   // ---------------------------------------------------------------- screens
   const ROLE = [
-    { name: 'PILOT', stick: PILOT_STICK, dev: 'PLAYER ' + (PILOT_STICK + 1) + ' STICK', color: C.pilot, lines: ['STICK  fly the ship', 'B1  boost', 'B2  brake', 'B3  hold: attractor field'] },
+    { name: 'PILOT', stick: PILOT_STICK, dev: 'LEFT STICK', color: C.pilot, lines: ['STICK  fly the ship', 'B1  boost', 'B2  brake', 'B3  hold: attractor field'] },
     { name: 'GUNNER', stick: -1, dev: 'TRACKBALL', color: C.gun, lines: ['ROLL  aim the turret', 'LEFT  rapid cannon', 'RIGHT  heavy torpedo', 'the only guns on the ship'] },
-    { name: 'ENGINEER', stick: ENGINEER_STICK, dev: 'PLAYER ' + (ENGINEER_STICK + 1) + ' STICK', color: C.eng, lines: ['STICK  aim the shield', 'B1  hold to repair hull', 'B2  emergency pulse', 'pulse: big blast, long recharge'] },
+    { name: 'ENGINEER', stick: ENGINEER_STICK, dev: 'RIGHT STICK', color: C.eng, lines: ['STICK  aim the shield', 'B1  hold to repair hull', 'B2  emergency pulse', 'pulse: big blast, long recharge'] },
   ];
   function drawCards(y, h, tips) {
     const cw = Math.min(360, (W - 80) / 3 - 16);
     ROLE.forEach((r, i) => {
-      const slot = r.stick < 0 ? 0 : r.stick === 0 ? -1 : 1; // P1 stick left, trackball centre, P2 stick right
-      const cx = W / 2 + slot * (cw + 20), x = cx - cw / 2;
+      const cx = W / 2 + (i - 1) * (cw + 20), x = cx - cw / 2; // pilot left, gunner centre, engineer right
       ctx.fillStyle = 'rgba(6,10,22,0.8)'; ctx.fillRect(x, y, cw, h);
       ctx.strokeStyle = r.color; ctx.lineWidth = 2.5; glow(r.color, 12); ctx.strokeRect(x, y, cw, h); noGlow();
       txt(r.name, cx, y + 28, 26, r.color);
