@@ -13,6 +13,8 @@
   const ctx = cv.getContext('2d');
   const TAU = Math.PI * 2;
   const DEV = /[?&]dev\b/.test(location.search);
+  // Which player stick runs which station (0 = Player 1 stick, 1 = Player 2 stick).
+  const PILOT_STICK = 1, ENGINEER_STICK = 0;
 
   const rand = (a, b) => a + Math.random() * (b - a);
   const pick = (arr) => arr[(Math.random() * arr.length) | 0];
@@ -434,7 +436,7 @@
 
   // PILOT: point the stick to fly that way. No weapons - boost, brake and the attractor field.
   function updatePilot(dt) {
-    const p = Input.p[0];
+    const p = Input.p[PILOT_STICK];
     let dx = p.x, dy = p.y;
     const mag = Math.hypot(dx, dy);
     ship.field = p.b[2];
@@ -584,7 +586,7 @@
     }
   }
   function updateEngineer(dt) {
-    const p = Input.p[1];
+    const p = Input.p[ENGINEER_STICK];
     if (p.active) engIdle = 0; else engIdle += dt;
     engAuto = engIdle > 6;
     ship.repairing = false;
@@ -777,7 +779,7 @@
 
   function updatePlay(dt) {
     if (Input.start) { paused = !paused; Sfx.ui(); }
-    if (DEV && Input.p[0].pressed[5]) { finishMission(); return; }
+    if (DEV && Input.p[PILOT_STICK].pressed[5]) { finishMission(); return; }
     if (paused) return;
     mTime += dt;
     ship.inv = Math.max(0, ship.inv - dt);
@@ -1116,7 +1118,7 @@
     txt('MISSION ' + (G.mi + 1) + (G.loop ? '  LOOP ' + (G.loop + 1) : '') + '  -  ' + M.def.name, W / 2, 54, 12, C.dim);
     txt(String(G.score).padStart(7, '0'), W - 24, 30, 26, C.white, 'right');
 
-    // station panels: laid out like the control panel (P1 left, trackball centre, P2 right)
+    // station panels: laid out like the control panel (P1 stick left, trackball centre, P2 stick right)
     const pw = Math.min(300, (W - 60) / 3 - 10), py = H - 92, ph = 80;
     const panel = (cx, color, title, auto) => {
       const x = cx - pw / 2;
@@ -1127,7 +1129,8 @@
       return x;
     };
     // pilot
-    let x = panel(30 + pw / 2, C.pilot, 'PILOT', false);
+    const side = (stick) => (stick === 0 ? 30 + pw / 2 : W - 30 - pw / 2);
+    let x = panel(side(PILOT_STICK), C.pilot, 'PILOT', false);
     if (ship.field) txt(ship.fieldLock ? 'FIELD PULLING' : 'FIELD ON', x + pw - 10, py + 14, 12, C.hull, 'right');
     bar(x + 10, py + 28, pw - 20, 16, ship.boost, C.pilot, 'BOOST');
     const sp = Math.hypot(ship.vx, ship.vy);
@@ -1137,7 +1140,7 @@
     bar(x + 10, py + 28, pw - 20, 16, ship.heat, C.gun, ship.overheated ? 'CANNON OVERHEAT!' : 'CANNON HEAT', ship.overheated);
     bar(x + 10, py + 52, pw - 20, 16, 1 - ship.torpCd / TORP_RELOAD, ship.torpCd <= 0 ? C.white : C.gun, ship.torpCd <= 0 ? 'TORPEDO READY' : 'TORPEDO LOADING');
     // engineer
-    x = panel(W - 30 - pw / 2, C.eng, 'ENGINEER', engAuto);
+    x = panel(side(ENGINEER_STICK), C.eng, 'ENGINEER', engAuto);
     if (ship.repairing) txt('REPAIRING', x + pw - 10, py + 14, 12, C.hull, 'right');
     bar(x + 10, py + 28, pw - 20, 16, ship.shield / 100, C.eng, ship.shieldOn ? 'SHIELD' : 'SHIELD OFFLINE', !ship.shieldOn);
     const ready = ship.pulse <= 0;
@@ -1155,14 +1158,15 @@
 
   // ---------------------------------------------------------------- screens
   const ROLE = [
-    { name: 'PILOT', dev: 'PLAYER 1 STICK', color: C.pilot, lines: ['STICK  fly the ship', 'B1  boost', 'B2  brake', 'B3  hold: attractor field'] },
-    { name: 'GUNNER', dev: 'TRACKBALL', color: C.gun, lines: ['ROLL  aim the turret', 'LEFT  rapid cannon', 'RIGHT  heavy torpedo', 'the only guns on the ship'] },
-    { name: 'ENGINEER', dev: 'PLAYER 2 STICK', color: C.eng, lines: ['STICK  aim the shield', 'B1  hold to repair hull', 'B2  emergency pulse', 'pulse: big blast, long recharge'] },
+    { name: 'PILOT', stick: PILOT_STICK, dev: 'PLAYER ' + (PILOT_STICK + 1) + ' STICK', color: C.pilot, lines: ['STICK  fly the ship', 'B1  boost', 'B2  brake', 'B3  hold: attractor field'] },
+    { name: 'GUNNER', stick: -1, dev: 'TRACKBALL', color: C.gun, lines: ['ROLL  aim the turret', 'LEFT  rapid cannon', 'RIGHT  heavy torpedo', 'the only guns on the ship'] },
+    { name: 'ENGINEER', stick: ENGINEER_STICK, dev: 'PLAYER ' + (ENGINEER_STICK + 1) + ' STICK', color: C.eng, lines: ['STICK  aim the shield', 'B1  hold to repair hull', 'B2  emergency pulse', 'pulse: big blast, long recharge'] },
   ];
   function drawCards(y, h, tips) {
     const cw = Math.min(360, (W - 80) / 3 - 16);
     ROLE.forEach((r, i) => {
-      const cx = W / 2 + (i - 1) * (cw + 20), x = cx - cw / 2;
+      const slot = r.stick < 0 ? 0 : r.stick === 0 ? -1 : 1; // P1 stick left, trackball centre, P2 stick right
+      const cx = W / 2 + slot * (cw + 20), x = cx - cw / 2;
       ctx.fillStyle = 'rgba(6,10,22,0.8)'; ctx.fillRect(x, y, cw, h);
       ctx.strokeStyle = r.color; ctx.lineWidth = 2.5; glow(r.color, 12); ctx.strokeRect(x, y, cw, h); noGlow();
       txt(r.name, cx, y + 28, 26, r.color);
@@ -1175,13 +1179,13 @@
         // live input check
         const ix = cx, iy = y + h - 34;
         ctx.strokeStyle = r.color; ctx.lineWidth = 1.5;
-        if (i === 1) {
+        if (r.stick < 0) {
           const m = Input.mouse;
           ctx.beginPath(); ctx.arc(ix - 40, iy, 14, 0, TAU); ctx.stroke();
           ctx.fillStyle = r.color; ctx.beginPath(); ctx.arc(ix - 40 + clamp(m.dx, -9, 9), iy + clamp(m.dy, -9, 9), 4, 0, TAU); ctx.fill();
           [m.left, m.right].forEach((on, k) => { ctx.beginPath(); ctx.arc(ix + 10 + k * 30, iy, 9, 0, TAU); if (on) ctx.fill(); ctx.stroke(); });
         } else {
-          const p = Input.p[i === 0 ? 0 : 1];
+          const p = Input.p[r.stick];
           const ox = ix - cw / 2 + 40;
           ctx.strokeRect(ox - 14, iy - 14, 28, 28);
           ctx.fillStyle = r.color; ctx.beginPath(); ctx.arc(ox + p.x * 9, iy + p.y * 9, 5, 0, TAU); ctx.fill();

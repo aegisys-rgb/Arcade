@@ -15,7 +15,7 @@ const Input = (() => {
     padButtons: [0, 1, 2, 3, 4, 5], // gamepad button index for B1..B6
     padStart: [8, 9],               // gamepad buttons treated as START
     hatAxis: -1,                    // set to 9 if your encoder reports the stick as a POV hat
-    trackballSensitivity: 1.0,
+    trackballSensitivity: 0.7,       // lower = slower crosshair
     pointerLock: !/[?&]nolock\b/.test(location.search), // capture the trackball so the crosshair never hits a screen edge
     keys: [
       { // Player 1 (MAME defaults)

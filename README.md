@@ -5,9 +5,9 @@ stations, one per control on the panel:
 
 | Station | Control | Does |
 |---|---|---|
-| **Pilot** | Player 1 stick | Point the stick to fly that way. **B1** boost (limited, recharges), **B2** brake, **B3** hold for the attractor field: pulls pickups and escape pods toward the ship, and reels the ship onto the docking beacon. No weapons. |
+| **Pilot** | Player 2 stick | Point the stick to fly that way. **B1** boost (limited, recharges), **B2** brake, **B3** hold for the attractor field: pulls pickups and escape pods toward the ship, and reels the ship onto the docking beacon. No weapons. |
 | **Gunner** | Trackball | The only weapons on the ship. Roll to aim anywhere on screen. **Left** is a rapid cannon (weak, overheats if held). **Right** is a heavy torpedo that bursts where the crosshair was, with a slow reload. |
-| **Engineer** | Player 2 stick | Stick aims the shield arc. **B1** hold to repair hull (drains shield). **B2** emergency pulse: a shockwave that heavily damages everything around the ship, with a 30 second recharge. |
+| **Engineer** | Player 1 stick | Stick aims the shield arc. **B1** hold to repair hull (drains shield). **B2** emergency pulse: a shockwave that heavily damages everything around the ship, with a 30 second recharge. |
 
 The shield only covers part of the ship, breaks after a few hits and recharges
 slowly. The cannon overheats, the attractor field slows the ship down while it
@@ -42,17 +42,18 @@ browser and press F11.)
 Sticks and buttons are read from both places at once, so most cabinets work
 unchanged:
 
-- **Game controllers** (USB encoders): first controller is the pilot, second is
-  the engineer. Buttons 1-6 are B1-B6. If the two are the wrong way round,
+- **Game controllers** (USB encoders): first controller is the engineer, second is
+  the pilot. Buttons 1-6 are B1-B6. If the two are the wrong way round,
   press **F2** to swap them (it is remembered).
-- **Keyboard encoders** (I-PAC etc., MAME default keys): P1 = arrows +
-  LCtrl (boost), LAlt (brake), Space (attractor field), LShift, Z, X. P2 = R/F/D/G + A (repair), S (pulse), Q, W, I, K.
+- **Keyboard encoders** (I-PAC etc., MAME default keys): P1 (engineer) = arrows +
+  LCtrl (repair), LAlt (pulse), Space, LShift, Z, X. P2 (pilot) = R/F/D/G + A (boost), S (brake), Q (attractor field), W, I, K.
   Start = 1 or 2 (pauses during play).
 
 The title screen shows a live input check for all three stations, so you can
 see what each stick and button is doing before you start.
 
-To change the mapping, trackball sensitivity, or dead zone, edit the `CFG`
+To change which stick runs which station, edit `PILOT_STICK` / `ENGINEER_STICK`
+at the top of `src/game.js`. To change the key mapping, trackball sensitivity, or dead zone, edit the `CFG`
 block at the top of `src/input.js`. If your encoder reports the stick as a POV
 hat rather than axes, set `hatAxis` there. Adding `?nolock` to the URL stops the
 game capturing the trackball pointer.
