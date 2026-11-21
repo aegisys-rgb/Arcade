@@ -302,7 +302,7 @@
       shield: 100, shieldAng: 0, shieldOn: true, shieldHitT: 9, shieldFlash: 0,
       boost: 1, boosting: false, thrusting: false, braking: false, field: false, fieldLock: false,
       heat: 0, overheated: false, turretCd: 0, turretAng: 0,
-      torpCd: 0, pulse: 0, pulseFx: 0, repairing: false,
+      torpCd: 0, autoTorpMul: 2.5, pulse: 0, pulseFx: 0, repairing: false,
     };
   }
   function newGame() {
@@ -514,10 +514,11 @@
   function fireTorpedo(ax, ay, reloadMul) {
     if (ship.torpCd > 0) return;
     ship.torpCd = TORP_RELOAD * reloadMul;
-    const a = Math.atan2(ay - ship.y, ax - ship.x), d = Math.hypot(ax - ship.x, ay - ship.y);
+    const a = Math.atan2(ay - ship.y, ax - ship.x);
+    // flies straight through the crosshair and keeps going until it hits something
     shots.push({
       x: ship.x + Math.cos(a) * 18, y: ship.y + Math.sin(a) * 18, vx: Math.cos(a) * TORP_SPEED, vy: Math.sin(a) * TORP_SPEED,
-      dmg: 8, by: 'gun', torp: true, life: clamp((d - 18) / TORP_SPEED, 0.08, 1.1),
+      dmg: 8, by: 'gun', torp: true, life: 2.2,
     });
     stats.shots++;
     Sfx.torpedo();
@@ -546,24 +547,37 @@
       else if (m.moved) { cross.x = m.ax * (W / innerWidth); cross.y = m.ay * (H / innerHeight); }
       fire = m.left; torp = m.right;
     } else {
-      // Auto-gunner: slow to aim and fire. A stopgap, not a substitute for a player.
-      let tgt = null, bd = 520, isEnemy = false;
+      // Auto-gunner. On missions where enemies must be destroyed (ambush, dreadnought) it fights at full
+      // speed so those missions don't drag; elsewhere it is slow, a stopgap rather than a substitute.
+      const combat = M.def.type === 'battle' || M.def.type === 'boss';
+      let tgt = null, bd = combat ? 950 : 520, isEnemy = false;
       for (const e of enemies) { if (e.dormant) continue; const d = dist(e, ship); if (d < bd && !(e.type === 'boss' && turretsAlive())) { bd = d; tgt = e; isEnemy = true; } }
       if (!tgt) { bd = 190; for (const a of asts) { const d = dist(a, ship) - a.r; if (d < bd) { bd = d; tgt = a; } } }
       const lead = tgt ? dist(tgt, ship) / 950 : 0; // aim where the target will be
-      const gx = tgt ? tgt.x + tgt.vx * lead - cam.x : ship.x - cam.x + Math.cos(ship.ang) * 150;
-      const gy = tgt ? tgt.y + tgt.vy * lead - cam.y : ship.y - cam.y + Math.sin(ship.ang) * 150;
-      cross.x = lerp(cross.x, gx, Math.min(1, dt * 4)); cross.y = lerp(cross.y, gy, Math.min(1, dt * 4));
-      const onTarget = !!tgt && Math.hypot(cross.x - gx, cross.y - gy) < 30;
-      fire = onTarget && ship.heat < 0.7;
+      // shots inherit 40% of the ship's velocity, so lead by the target's velocity relative to that
+      const px = tgt ? tgt.x + (tgt.vx - ship.vx * 0.4) * lead : ship.x + Math.cos(ship.ang) * 150;
+      const py = tgt ? tgt.y + (tgt.vy - ship.vy * 0.4) * lead : ship.y + Math.sin(ship.ang) * 150;
+      // Swing the turret by angle, so it can track targets that are off screen or crossing fast.
+      const want = Math.atan2(py - ship.y, px - ship.x);
+      const cur = Math.atan2(cross.y + cam.y - ship.y, cross.x + cam.x - ship.x);
+      const na = turnTo(cur, want, (combat ? 7 : 2.5) * dt);
+      const sx = ship.x - cam.x, sy = ship.y - cam.y, cx = Math.cos(na), cy = Math.sin(na);
+      let r = Math.hypot(px - ship.x, py - ship.y);
+      if (cx > 0.001) r = Math.min(r, (W - 12 - sx) / cx); else if (cx < -0.001) r = Math.min(r, (12 - sx) / cx);
+      if (cy > 0.001) r = Math.min(r, (H - 12 - sy) / cy); else if (cy < -0.001) r = Math.min(r, (12 - sy) / cy);
+      r = Math.max(30, r);
+      cross.x = sx + cx * r; cross.y = sy + cy * r;
+      const onTarget = !!tgt && Math.abs(angDiff(na, want)) < (combat ? 0.1 : 0.07);
+      fire = onTarget && ship.heat < (combat ? 0.9 : 0.7);
       torp = onTarget && isEnemy;
-      rate = 0.4;
+      rate = combat ? 1 : 0.4;
+      ship.autoTorpMul = combat ? 1.2 : 2.5;
     }
     cross.x = clamp(cross.x, 8, W - 8); cross.y = clamp(cross.y, 8, H - 8);
     const ax = cross.x + cam.x, ay = cross.y + cam.y;
     ship.turretAng = Math.atan2(ay - ship.y, ax - ship.x);
     if (fire) fireCannon(ax, ay, rate);
-    if (torp) fireTorpedo(ax, ay, gunAuto ? 2.5 : 1);
+    if (torp) fireTorpedo(ax, ay, gunAuto ? ship.autoTorpMul : 1);
   }
 
   // ENGINEER: shield arc, hull repair, and the emergency pulse.
@@ -733,8 +747,8 @@
     }
     for (const s of shots) {
       s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt;
-      if (s.life <= 0) { if (s.torp) detonate(s, null); continue; }
-      if (M.station && ringHit(s.x, s.y, 3)) { s.life = 0; addParts(s.x, s.y, 3, C.white, 80, 0.2, 2); continue; }
+      if (s.life <= 0) continue; // a torpedo that hits nothing just fizzles out far off screen
+      if (M.station && ringHit(s.x, s.y, 3)) { s.life = 0; if (s.torp) detonate(s, null); else addParts(s.x, s.y, 3, C.white, 80, 0.2, 2); continue; }
       let hit = null;
       for (const e of enemies) {
         if (e.dead || Math.hypot(e.x - s.x, e.y - s.y) > e.r + 5) continue;
@@ -1160,7 +1174,7 @@
   // ---------------------------------------------------------------- screens
   const ROLE = [
     { name: 'PILOT', stick: PILOT_STICK, dev: 'LEFT STICK', color: C.pilot, lines: ['STICK  fly the ship', 'B1  boost', 'B2  brake', 'B3  hold: attractor field'] },
-    { name: 'GUNNER', stick: -1, dev: 'TRACKBALL', color: C.gun, lines: ['ROLL  aim the turret', 'LEFT  rapid cannon', 'RIGHT  heavy torpedo', 'the only guns on the ship'] },
+    { name: 'GUNNER', stick: -1, dev: 'TRACKBALL', color: C.gun, lines: ['ROLL  aim the turret', 'LEFT  rapid cannon', 'RIGHT  heavy torpedo', 'torpedoes burst on impact'] },
     { name: 'ENGINEER', stick: ENGINEER_STICK, dev: 'RIGHT STICK', color: C.eng, lines: ['STICK  aim the shield', 'B1  hold to repair hull', 'B2  emergency pulse', 'pulse: big blast, long recharge'] },
   ];
   function drawCards(y, h, tips) {
@@ -1356,7 +1370,7 @@
 
   if (DEV) {
     window.TRINARY = {
-      get state() { return state; }, get G() { return G; }, get ship() { return ship; }, get M() { return M; }, get stats() { return stats; }, get mTime() { return mTime; }, get cross() { return cross; }, get cam() { return cam; }, get W() { return W; }, get pickups() { return pickups; },
+      get state() { return state; }, get G() { return G; }, get ship() { return ship; }, get M() { return M; }, get stats() { return stats; }, get mTime() { return mTime; }, get cross() { return cross; }, get cam() { return cam; }, get W() { return W; }, get pickups() { return pickups; }, get shots() { return shots; }, get enemies() { return enemies; }, get paused() { return paused; }, get stats() { return stats; },
       get counts() { return { asts: asts.length, enemies: enemies.length, bullets: bullets.length, shots: shots.length, parts: parts.length }; },
       goto(i) { G.mi = i; startMission(); },
     };
