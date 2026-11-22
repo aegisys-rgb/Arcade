@@ -434,8 +434,19 @@
   // ---------------------------------------------------------------- crew stations
   const FIELD_R = 330;                    // pilot's attractor field radius
   const TORP_SPEED = 620, TORP_BLAST = 95, TORP_RELOAD = 1.6;
-  // Heat seeking: a torpedo curves toward the nearest enemy ahead of it, within this range and turn rate.
-  const SEEK_RANGE = 480, SEEK_CONE = 1.2, SEEK_TURN = 2.4;
+  // Target lock: when fired, a torpedo locks onto the enemy nearest the crosshair, if one is within
+  // LOCK_RADIUS of it, and curves after that enemy at up to SEEK_TURN radians per second.
+  // With nothing in the circle it flies straight.
+  const LOCK_RADIUS = 110, SEEK_TURN = 3.2;
+  function lockTarget(ax, ay) {
+    let best = null, bd = LOCK_RADIUS;
+    for (const e of enemies) {
+      if (e.dead || e.dormant || (e.type === 'boss' && turretsAlive())) continue; // armoured boss: lock its turrets instead
+      const d = Math.hypot(e.x - ax, e.y - ay) - e.r * 0.5; // big targets are a little easier to catch
+      if (d < bd) { bd = d; best = e; }
+    }
+    return best;
+  }
   const PULSE_R = 300, PULSE_CD = 30;     // engineer's emergency pulse
 
   // PILOT: point the stick to fly that way. No weapons - boost, brake and the attractor field.
@@ -520,7 +531,7 @@
     // flies straight through the crosshair and keeps going until it hits something
     shots.push({
       x: ship.x + Math.cos(a) * 18, y: ship.y + Math.sin(a) * 18, vx: Math.cos(a) * TORP_SPEED, vy: Math.sin(a) * TORP_SPEED,
-      dmg: 8, by: 'gun', torp: true, life: 2.2, age: 0, seek: null,
+      dmg: 8, by: 'gun', torp: true, life: 2.2, age: 0, seek: lockTarget(ax, ay),
     });
     stats.shots++;
     Sfx.torpedo();
@@ -739,17 +750,11 @@
 
   function steerTorpedo(s, dt) {
     s.age += dt;
-    s.seek = null;
-    if (s.age < 0.12) return; // clear the ship before it starts hunting
-    const head = Math.atan2(s.vy, s.vx);
-    let best = null, bd = SEEK_RANGE;
-    for (const e of enemies) {
-      if (e.dead || e.dormant || (e.type === 'boss' && turretsAlive())) continue; // armoured boss: go for its turrets
-      const d = Math.hypot(e.x - s.x, e.y - s.y);
-      if (d < bd && Math.abs(angDiff(Math.atan2(e.y - s.y, e.x - s.x), head)) < SEEK_CONE) { bd = d; best = e; }
-    }
+    const best = s.seek;
     if (!best) return;
-    s.seek = best;
+    if (best.dead) { s.seek = null; return; } // target gone: carry on in a straight line
+    if (s.age < 0.12) return; // clear the ship before it starts turning
+    const head = Math.atan2(s.vy, s.vx);
     const sp = Math.hypot(s.vx, s.vy);
     const na = turnTo(head, Math.atan2(best.y - s.y, best.x - s.x), SEEK_TURN * dt);
     s.vx = Math.cos(na) * sp; s.vy = Math.sin(na) * sp;
@@ -1149,7 +1154,24 @@
     for (let i = 0; i < 4; i++) { const a = i * TAU / 4; ctx.moveTo(Math.cos(a) * 8, Math.sin(a) * 8); ctx.lineTo(Math.cos(a) * 21, Math.sin(a) * 21); }
     ctx.stroke(); noGlow();
     ctx.fillStyle = C.gun; ctx.fillRect(-1.5, -1.5, 3, 3);
+    if (ship.torpCd <= 0 && state === 'play') {
+      ctx.strokeStyle = C.gun; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.35; ctx.setLineDash([4, 8]);
+      ctx.beginPath(); ctx.arc(0, 0, LOCK_RADIUS, 0, TAU); ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
     ctx.restore();
+    if (ship.torpCd <= 0 && state === 'play') {
+      const t = lockTarget(cross.x + cam.x, cross.y + cam.y);
+      if (t) {
+        const x = t.x - cam.x, y = t.y - cam.y, r = t.r + 10;
+        ctx.strokeStyle = C.gun; ctx.lineWidth = 2; ctx.globalAlpha = 0.9;
+        for (let q = 0; q < 4; q++) {
+          const cx = Math.cos(q * TAU / 4 + TAU / 8) * r, cy = Math.sin(q * TAU / 4 + TAU / 8) * r;
+          ctx.beginPath(); ctx.moveTo(x + cx - Math.sign(cx) * 7, y + cy); ctx.lineTo(x + cx, y + cy); ctx.lineTo(x + cx, y + cy - Math.sign(cy) * 7); ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
 
     // offscreen indicators
     for (const e of enemies) if (!e.dormant && e.type !== 'turret' && (e.type !== 'mine' || e.armed) && dist(e, ship) < 1100) edgeArrow(e.x, e.y, C.bad, 8);
@@ -1203,7 +1225,7 @@
   // ---------------------------------------------------------------- screens
   const ROLE = [
     { name: 'PILOT', stick: PILOT_STICK, dev: 'LEFT STICK', color: C.pilot, lines: ['STICK  fly the ship', 'B1  boost', 'B2  brake', 'B3  hold: attractor field'] },
-    { name: 'GUNNER', stick: -1, dev: 'TRACKBALL', color: C.gun, lines: ['ROLL  aim the turret', 'LEFT  rapid cannon', 'RIGHT  heat-seeking torpedo', 'torpedoes burst on impact'] },
+    { name: 'GUNNER', stick: -1, dev: 'TRACKBALL', color: C.gun, lines: ['ROLL  aim the turret', 'LEFT  rapid cannon', 'RIGHT  homing torpedo', 'locks the enemy at the crosshair'] },
     { name: 'ENGINEER', stick: ENGINEER_STICK, dev: 'RIGHT STICK', color: C.eng, lines: ['STICK  aim the shield', 'B1  hold to repair hull', 'B2  emergency pulse', 'pulse: big blast, long recharge'] },
   ];
   function drawCards(y, h, tips) {
