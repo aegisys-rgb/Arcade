@@ -6,7 +6,7 @@ stations, one per control on the panel:
 | Station | Control | Does |
 |---|---|---|
 | **Pilot** | Left stick | Point the stick to fly that way. **B1** boost (limited, recharges), **B2** brake, **B3** hold for the attractor field: pulls pickups and escape pods toward the ship, and reels the ship onto the docking beacon. No weapons. |
-| **Gunner** | Trackball | The only weapons on the ship. Roll to aim anywhere on screen. **Left** is a rapid cannon (weak, overheats if held). **Right** is a heavy torpedo that flies through the crosshair and bursts on whatever it hits, with a slow reload. |
+| **Gunner** | Trackball | The only weapons on the ship. Roll to aim anywhere on screen. **Left** is a rapid cannon (weak, overheats if held). **Right** is a heavy heat-seeking torpedo: it flies toward the crosshair, curves after the nearest enemy ahead of it, and bursts on whatever it hits. Slow reload. |
 | **Engineer** | Right stick | Stick aims the shield arc. **B1** hold to repair hull (drains shield). **B2** emergency pulse: a shockwave that heavily damages everything around the ship, with a 30 second recharge. |
 
 The shield only covers part of the ship, breaks after a few hits and recharges

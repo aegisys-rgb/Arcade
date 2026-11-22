@@ -434,6 +434,8 @@
   // ---------------------------------------------------------------- crew stations
   const FIELD_R = 330;                    // pilot's attractor field radius
   const TORP_SPEED = 620, TORP_BLAST = 95, TORP_RELOAD = 1.6;
+  // Heat seeking: a torpedo curves toward the nearest enemy ahead of it, within this range and turn rate.
+  const SEEK_RANGE = 480, SEEK_CONE = 1.2, SEEK_TURN = 2.4;
   const PULSE_R = 300, PULSE_CD = 30;     // engineer's emergency pulse
 
   // PILOT: point the stick to fly that way. No weapons - boost, brake and the attractor field.
@@ -518,7 +520,7 @@
     // flies straight through the crosshair and keeps going until it hits something
     shots.push({
       x: ship.x + Math.cos(a) * 18, y: ship.y + Math.sin(a) * 18, vx: Math.cos(a) * TORP_SPEED, vy: Math.sin(a) * TORP_SPEED,
-      dmg: 8, by: 'gun', torp: true, life: 2.2,
+      dmg: 8, by: 'gun', torp: true, life: 2.2, age: 0, seek: null,
     });
     stats.shots++;
     Sfx.torpedo();
@@ -735,6 +737,23 @@
     }
   }
 
+  function steerTorpedo(s, dt) {
+    s.age += dt;
+    s.seek = null;
+    if (s.age < 0.12) return; // clear the ship before it starts hunting
+    const head = Math.atan2(s.vy, s.vx);
+    let best = null, bd = SEEK_RANGE;
+    for (const e of enemies) {
+      if (e.dead || e.dormant || (e.type === 'boss' && turretsAlive())) continue; // armoured boss: go for its turrets
+      const d = Math.hypot(e.x - s.x, e.y - s.y);
+      if (d < bd && Math.abs(angDiff(Math.atan2(e.y - s.y, e.x - s.x), head)) < SEEK_CONE) { bd = d; best = e; }
+    }
+    if (!best) return;
+    s.seek = best;
+    const sp = Math.hypot(s.vx, s.vy);
+    const na = turnTo(head, Math.atan2(best.y - s.y, best.x - s.x), SEEK_TURN * dt);
+    s.vx = Math.cos(na) * sp; s.vy = Math.sin(na) * sp;
+  }
   function updateProjectiles(dt) {
     for (const b of bullets) {
       b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
@@ -746,6 +765,7 @@
       } else if (d < 14) { b.life = 0; hurt(12); }
     }
     for (const s of shots) {
+      if (s.torp) steerTorpedo(s, dt);
       s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt;
       if (s.life <= 0) continue; // a torpedo that hits nothing just fizzles out far off screen
       if (M.station && ringHit(s.x, s.y, 3)) { s.life = 0; if (s.torp) detonate(s, null); else addParts(s.x, s.y, 3, C.white, 80, 0.2, 2); continue; }
@@ -1078,6 +1098,15 @@
       ctx.strokeStyle = col; ctx.lineWidth = s.torp ? 7 : 2.5; glow(col, s.torp ? 18 : 8);
       ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x - s.vx * (s.torp ? 0.03 : 0.018), s.y - s.vy * (s.torp ? 0.03 : 0.018)); ctx.stroke();
       if (s.torp) { ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(s.x, s.y, 4, 0, TAU); ctx.fill(); }
+      if (s.seek && !s.seek.dead) {
+        const t = s.seek, r = t.r + 9;
+        ctx.lineWidth = 2; ctx.globalAlpha = 0.8;
+        for (let q = 0; q < 4; q++) {
+          const a = q * TAU / 4 + TAU / 8 + stateT * 3;
+          ctx.beginPath(); ctx.arc(t.x, t.y, r, a - 0.3, a + 0.3); ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
     }
     glow(C.bad, 12);
     for (const b of bullets) {
@@ -1174,7 +1203,7 @@
   // ---------------------------------------------------------------- screens
   const ROLE = [
     { name: 'PILOT', stick: PILOT_STICK, dev: 'LEFT STICK', color: C.pilot, lines: ['STICK  fly the ship', 'B1  boost', 'B2  brake', 'B3  hold: attractor field'] },
-    { name: 'GUNNER', stick: -1, dev: 'TRACKBALL', color: C.gun, lines: ['ROLL  aim the turret', 'LEFT  rapid cannon', 'RIGHT  heavy torpedo', 'torpedoes burst on impact'] },
+    { name: 'GUNNER', stick: -1, dev: 'TRACKBALL', color: C.gun, lines: ['ROLL  aim the turret', 'LEFT  rapid cannon', 'RIGHT  heat-seeking torpedo', 'torpedoes burst on impact'] },
     { name: 'ENGINEER', stick: ENGINEER_STICK, dev: 'RIGHT STICK', color: C.eng, lines: ['STICK  aim the shield', 'B1  hold to repair hull', 'B2  emergency pulse', 'pulse: big blast, long recharge'] },
   ];
   function drawCards(y, h, tips) {
