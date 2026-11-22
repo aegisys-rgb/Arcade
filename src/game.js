@@ -157,6 +157,39 @@
     } while ((x < 40 || y < 40 || x > world.w - 40 || y > world.h - 40) && ++tries < 40);
     return mkEnemy(type, clamp(x, 40, world.w - 40), clamp(y, 40, world.h - 40), extra);
   }
+  // ---------------------------------------------------------------- black hole
+  // Pull (px/s^2) at distance r from the singularity. Gentle far out, steep close in. At the event
+  // horizon it is HOLE_EDGE_PULL x the ship's normal thrust, so flying straight out still slowly
+  // gains ground; inside the horizon it overpowers the engines and only BOOST can get you out.
+  const SHIP_THRUST = 560, HOLE_FAR_PULL = 25, HOLE_EDGE_PULL = 0.9, HOLE_CORE_PULL = 1.6;
+  function holePull(r) {
+    const h = M.hole, edge = SHIP_THRUST * HOLE_EDGE_PULL;
+    if (r >= h.R) return HOLE_FAR_PULL + (edge - HOLE_FAR_PULL) * Math.pow(h.R / r, 1.6);
+    return lerp(SHIP_THRUST * HOLE_CORE_PULL, edge, clamp((r - h.core) / (h.R - h.core), 0, 1));
+  }
+  // Pulls o toward the hole; returns true if it has fallen into the singularity.
+  function applyHole(o, dt, mul) {
+    const h = M.hole;
+    if (!h) return false;
+    const dx = h.x - o.x, dy = h.y - o.y, r = Math.hypot(dx, dy) || 1;
+    if (r < h.core) return true;
+    const g = holePull(r) * (mul === undefined ? 1 : mul) * dt;
+    o.vx += dx / r * g; o.vy += dy / r * g;
+    return false;
+  }
+  // Velocity for a circular orbit at o's position (counter-clockwise on screen).
+  function orbitVel(o) {
+    const h = M.hole, dx = o.x - h.x, dy = o.y - h.y, r = Math.hypot(dx, dy) || 1, v = Math.sqrt(holePull(r) * r);
+    return [dy / r * v, -dx / r * v];
+  }
+  function mkOrbiter(list, mk, r0, r1) {
+    const h = M.hole, a = Math.random() * TAU, r = rand(r0, r1);
+    const o = mk(h.x + Math.cos(a) * r, h.y + Math.sin(a) * r);
+    const v = orbitVel(o); o.vx = v[0]; o.vy = v[1]; o.orbit = true;
+    if (list) list.push(o);
+    return o;
+  }
+
   function mkPickup(type, x, y, vx, vy) {
     pickups.push({ type, x, y, vx: vx || rand(-30, 30), vy: vy || rand(-30, 30), r: type === 'pod' ? 16 : 11, t: Math.random() * 10, life: type === 'pod' ? Infinity : 22 });
   }
@@ -167,7 +200,40 @@
     rescue: ['Fly close and hold B3. The field pulls pods in.', 'Keep the pirates off us while we collect.', 'Cover the ship while it slows down.'],
     battle: ['Keep moving. You are the hard target.', 'Cannon the drones, torpedo the fighters.', 'Block incoming fire. Pulse when swarmed.'],
     dock: ['Slip the gap, BRAKE in the bay. B3 reels us in.', 'Clear the mines off our approach.', 'Shield the side the mines come from.'],
+    hole: ['Stay out of the red ring. Only BOOST gets us out.', 'Clear the debris stream. Lure drones into the hole.', 'Shield the debris stream. Repair when it is calm.'],
     boss: ['Circle it. Never stop moving.', 'Kill the 4 turrets, then the core.', 'Shield toward the dreadnought. Pulse the drones.'],
+  };
+  const HOLE_MISSION = {
+    name: 'EVENT HORIZON', type: 'hole', world: [3400, 3400], par: 120,
+    brief: 'Escape pods are orbiting a black hole. Get them before they fall in.',
+    setup() {
+      M.hole = { x: 1700, y: 1700, R: 170, core: 42, spin: 0 };
+      ship.x = 240; ship.y = 1700;
+      M.total = 6; M.rescued = 0; M.lost = 0; M.spawnT = 10; M.debris = Math.round((34 + 6 * diff()) * D().rocks);
+      for (let i = 0; i < M.total; i++) mkOrbiter(null, (x, y) => { mkPickup('pod', x, y); return pickups[pickups.length - 1]; }, 300 + i * 150, 360 + i * 150);
+      for (let i = 0; i < M.debris; i++) mkOrbiter(asts, (x, y) => mkAst(x, y, Math.random() < 0.5 ? 0 : 1), 260, 1500);
+    },
+    update(dt) {
+      M.hole.spin += dt;
+      // the accretion disc keeps feeding in fresh debris from outside
+      if (asts.length < M.debris) mkOrbiter(asts, (x, y) => mkAst(x, y, Math.random() < 0.6 ? 0 : 1), 1350, 1600);
+      M.spawnT -= dt;
+      if (M.spawnT <= 0 && enemies.length < 3 + diff()) {
+        M.spawnT = 14 - Math.min(5, diff() * 2);
+        for (const type of ['drone', 'drone', 'fighter']) {
+          let tries = 0, e;
+          do { e = spawnNear(type, 650, 800); if (dist(e, M.hole) > 500) break; e.dead = true; } while (++tries < 10);
+        }
+        enemies = enemies.filter((e) => !e.dead);
+      }
+    },
+    objective: () => 'RECOVER ESCAPE PODS  ' + M.rescued + '/' + M.total + (M.lost ? '   LOST ' + M.lost : ''),
+    nav: () => {
+      let best = null, bd = 1e9;
+      for (const p of pickups) if (p.type === 'pod') { const d = dist(p, ship); if (d < bd) { bd = d; best = p; } }
+      return best;
+    },
+    done: () => M.rescued >= M.total,
   };
   const MISSIONS = [
     {
@@ -260,6 +326,7 @@
       nav: () => M.station,
       done: () => M.station.dock >= 2.2,
     },
+    HOLE_MISSION,
     {
       name: 'IRON STORM', type: 'run', world: [14000, 1800], par: 100, meteors: 1.1,
       brief: 'Dense rock, live mines, pirate patrols. Punch through to the gate.',
@@ -305,8 +372,10 @@
       torpCd: 0, autoTorpMul: 2.5, pulse: 0, pulseFx: 0, repairing: false,
     };
   }
+  // index.html?start=N begins a new game at mission N (handy for trying a particular level)
+  const START_MISSION = (() => { const m = /[?&]start=(\d+)/.exec(location.search); return m ? clamp(parseInt(m[1], 10) - 1, 0, MISSIONS.length - 1) : 0; })();
   function newGame() {
-    G = { score: 0, mi: 0, loop: 0 };
+    G = { score: 0, mi: START_MISSION, loop: 0 };
     startMission();
   }
   function startMission() {
@@ -470,6 +539,7 @@
     }
     if (ship.boosting) ship.boost = Math.max(0, ship.boost - dt * 0.45);
     else ship.boost = Math.min(1, ship.boost + dt * 0.16);
+    if (applyHole(ship, dt) && state === 'play') { ship.inv = 0; hurt(1000); addText(ship.x, ship.y - 40, 'SPAGHETTIFIED', C.bad); }
     const drag = Math.exp(-(ship.braking ? 4 : 0.85) * dt);
     ship.vx *= drag; ship.vy *= drag;
     const maxV = 320 * slow * (ship.boosting ? 1.6 : 1), v = Math.hypot(ship.vx, ship.vy);
@@ -646,9 +716,10 @@
   // ---------------------------------------------------------------- world update
   function updateAsts(dt) {
     for (const a of asts) {
+      if (applyHole(a, dt)) { a.dead = true; addParts(a.x, a.y, 8, '#ffb070', 60, 0.5, 2); continue; }
       a.x += a.vx * dt; a.y += a.vy * dt; a.rot += a.spin * dt; a.flash -= dt;
       const sp = Math.hypot(a.vx, a.vy);
-      if (sp > 120 && !a.fast) { const k = Math.exp(-1.5 * dt); a.vx *= k; a.vy *= k; }
+      if (sp > 120 && !a.fast && !a.orbit) { const k = Math.exp(-1.5 * dt); a.vx *= k; a.vy *= k; }
       if (a.x < a.r) { a.x = a.r; a.vx = Math.abs(a.vx); }
       if (a.y < a.r) { a.y = a.r; a.vy = Math.abs(a.vy); }
       if (a.x > world.w - a.r) { a.x = world.w - a.r; a.vx = -Math.abs(a.vx); }
@@ -727,6 +798,7 @@
           }
         }
       }
+      if (e.type !== 'boss' && e.type !== 'turret' && applyHole(e, dt)) { addText(e.x, e.y - 20, 'SWALLOWED', C.eng); killEnemy(e, 'hole'); continue; }
       e.x += e.vx * dt; e.y += e.vy * dt;
       e.x = clamp(e.x, e.r, world.w - e.r); e.y = clamp(e.y, e.r, world.h - e.r);
 
@@ -761,6 +833,7 @@
   }
   function updateProjectiles(dt) {
     for (const b of bullets) {
+      if (applyHole(b, dt, 0.5)) { b.life = 0; continue; }
       b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
       if (b.life <= 0) continue;
       if (M.station && ringHit(b.x, b.y, 4)) { b.life = 0; addParts(b.x, b.y, 3, C.bad, 80, 0.25, 2); continue; }
@@ -791,8 +864,17 @@
   function updatePickups(dt) {
     for (const p of pickups) {
       p.t += dt; p.life -= dt;
+      if (applyHole(p, dt)) {
+        p.life = 0; addParts(p.x, p.y, 10, C.white, 60, 0.6, 2);
+        if (p.type === 'pod') {
+          // a lost pod is replaced further out, so the mission can always be finished
+          M.lost++; toast = 'POD LOST TO THE SINGULARITY'; toastT = 2.5; Sfx.shieldDown();
+          mkOrbiter(null, (x, y) => { mkPickup('pod', x, y); return pickups[pickups.length - 1]; }, 1100, 1450);
+        }
+        continue;
+      }
       p.x += p.vx * dt; p.y += p.vy * dt;
-      const k = Math.exp(-0.6 * dt); p.vx *= k; p.vy *= k;
+      if (!p.orbit) { const k = Math.exp(-0.6 * dt); p.vx *= k; p.vy *= k; }
       p.x = clamp(p.x, 20, world.w - 20); p.y = clamp(p.y, 20, world.h - 20);
       if (dist(p, ship) < 30 + p.r) {
         p.life = 0; Sfx.pickup(); stats.picked++;
@@ -961,6 +1043,32 @@
     ctx.restore();
   }
 
+  function drawHole(h) {
+    ctx.save(); ctx.translate(h.x, h.y);
+    // faint rings showing how far the pull reaches
+    ctx.strokeStyle = '#ff8a3c'; ctx.lineWidth = 1;
+    for (const r of [h.R * 2.5, h.R * 4, h.R * 6]) { ctx.globalAlpha = 0.08; ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke(); }
+    // accretion disc
+    const g = ctx.createRadialGradient(0, 0, h.core, 0, 0, h.R * 2.3);
+    g.addColorStop(0, 'rgba(255,240,200,0.95)'); g.addColorStop(0.18, 'rgba(255,170,70,0.75)');
+    g.addColorStop(0.45, 'rgba(200,60,120,0.35)'); g.addColorStop(1, 'rgba(60,20,90,0)');
+    ctx.globalAlpha = 1; ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(0, 0, h.R * 2.3, 0, TAU); ctx.fill();
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 14; i++) {
+      const r = h.R * (0.95 + (i % 7) * 0.19), a0 = -h.spin * (300 / r) + i * 2.1;
+      ctx.strokeStyle = i % 2 ? '#ffd29a' : '#ff7a50'; ctx.globalAlpha = 0.5; ctx.lineWidth = 2 + (i % 3);
+      ctx.beginPath(); ctx.arc(0, 0, r, a0, a0 + 0.9); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // event horizon
+    ctx.fillStyle = '#000000'; glow('#ff9a40', 30);
+    ctx.beginPath(); ctx.arc(0, 0, h.R * 0.82, 0, TAU); ctx.fill(); noGlow();
+    ctx.strokeStyle = C.bad; ctx.lineWidth = 2.5; ctx.setLineDash([12, 10]); ctx.lineDashOffset = -h.spin * 20;
+    ctx.beginPath(); ctx.arc(0, 0, h.R, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+    ctx.restore();
+    txt('EVENT HORIZON', h.x, h.y - h.R - 18, 13, C.bad, 'center', 0.8);
+  }
   function drawWorld() {
     ctx.save();
     const sx = shake ? rand(-shake, shake) * 0.5 : 0, sy = shake ? rand(-shake, shake) * 0.5 : 0;
@@ -971,6 +1079,7 @@
     ctx.strokeStyle = 'rgba(255,90,79,0.5)'; ctx.lineWidth = 3; ctx.setLineDash([18, 14]);
     ctx.strokeRect(0, 0, world.w, world.h); ctx.setLineDash([]);
 
+    if (M.hole && vis(M.hole, 900)) drawHole(M.hole);
     if (M.gate && vis(M.gate, 150)) {
       const g = M.gate;
       ctx.save(); ctx.translate(g.x, g.y);
@@ -1177,6 +1286,16 @@
     for (const e of enemies) if (!e.dormant && e.type !== 'turret' && (e.type !== 'mine' || e.armed) && dist(e, ship) < 1100) edgeArrow(e.x, e.y, C.bad, 8);
     const nav = M.def.nav();
     if (nav) edgeArrow(nav.x, nav.y, C.hull, 14, Math.round(dist(nav, ship) / 10) + 'm');
+    if (M.hole) {
+      edgeArrow(M.hole.x, M.hole.y, '#ff8a3c', 11, 'HOLE');
+      const pull = holePull(Math.max(1, dist(ship, M.hole))) / SHIP_THRUST;
+      if (pull > 0.35) {
+        const danger = pull >= 0.75, inside = pull > HOLE_EDGE_PULL;
+        const col = inside ? C.bad : danger ? '#ff8a3c' : C.eng;
+        const label = inside ? 'GRAVITY ' + Math.round(pull * 100) + '% OF THRUST - BOOST OUT!' : 'GRAVITY ' + Math.round(pull * 100) + '% OF THRUST';
+        txt(label, W / 2, 80, inside ? 20 : 15, col, 'center', inside && Math.floor(stateT * 6) % 2 ? 0.45 : 1);
+      }
+    }
 
     // top bar
     txt('HULL', 24, 30, 15, C.hull, 'left');

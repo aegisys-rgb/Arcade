@@ -16,9 +16,16 @@ is on, and the hull is shared, so the crew has to talk to each other.
 Difficulty (Easy / Normal / Hard) is chosen on the title screen with either
 stick, left or right, and is remembered. Harder settings score more.
 
-Six missions, then it loops harder: asteroid belt run, escape-pod rescue,
-pirate ambush, docking inside a spinning station, a mined asteroid run, and a
-dreadnought boss. Any station nobody touches for a few seconds goes on AUTO
+Seven missions, then it loops harder: asteroid belt run, escape-pod rescue,
+pirate ambush, docking inside a spinning station, pod recovery around a black
+hole, a mined asteroid run, and a dreadnought boss.
+
+The black hole (mission 5) pulls on everything: gently far out, harder the
+closer you get. At the dashed red event horizon the pull is 90% of the ship's
+thrust, so flying straight out still slowly gains ground; inside it, only
+BOOST can get you out. Pods, debris and enemies orbit and fall in too.
+
+To jump straight to a mission, open `index.html?start=N` (e.g. `?start=5`). Any station nobody touches for a few seconds goes on AUTO
 (weaker than a human), so it is playable with one or two people.
 
 ## Running it
