@@ -517,7 +517,7 @@
 
   // ---------------------------------------------------------------- crew stations
   const FIELD_R = 330;                    // pilot's attractor field radius
-  const TORP_SPEED = 620, TORP_BLAST = 95, TORP_RELOAD = 1.6;
+  const TORP_SPEED = 620, TORP_BLAST = 95, TORP_RELOAD = 2.4;
   // Target lock: when fired, a torpedo locks onto the enemy nearest the crosshair, if one is within
   // LOCK_RADIUS of it, and curves after that enemy at up to SEEK_TURN radians per second.
   // With nothing in the circle it flies straight.
