@@ -200,17 +200,32 @@
     rescue: ['Fly close and hold B3. The field pulls pods in.', 'Keep the pirates off us while we collect.', 'Cover the ship while it slows down.'],
     battle: ['Keep moving. You are the hard target.', 'Cannon the drones, torpedo the fighters.', 'Block incoming fire. Pulse when swarmed.'],
     dock: ['Slip the gap, BRAKE in the bay. B3 reels us in.', 'Clear the mines off our approach.', 'Shield the side the mines come from.'],
-    hole: ['Stay out of the red ring. Only BOOST gets us out.', 'Clear the debris stream. Lure drones into the hole.', 'Shield the debris stream. Repair when it is calm.'],
+    hole: ['Stay out of the red ring. Only BOOST gets us out.', 'Pop the blue bubbles when we are close. They come back.', 'Shield the debris stream. Repair when it is calm.'],
     boss: ['Circle it. Never stop moving.', 'Kill the 4 turrets, then the core.', 'Shield toward the dreadnought. Pulse the drones.'],
   };
   const HOLE_MISSION = {
     name: 'EVENT HORIZON', type: 'hole', world: [3400, 3400], par: 120,
-    brief: 'Escape pods are orbiting a black hole. Get them before they fall in.',
+    brief: 'Escape pods are scattered round a black hole. Some are shielded - shoot the bubble, then grab them.',
     setup() {
       M.hole = { x: 1700, y: 1700, R: 170, core: 42, spin: 0 };
       ship.x = 240; ship.y = 1700;
       M.total = 6; M.rescued = 0; M.lost = 0; M.spawnT = 10; M.debris = Math.round((34 + 6 * diff()) * D().rocks);
-      for (let i = 0; i < M.total; i++) mkOrbiter(null, (x, y) => { mkPickup('pod', x, y); return pickups[pickups.length - 1]; }, 300 + i * 150, 360 + i * 150);
+      // Six pods, spread all the way round the hole so the crew has to travel:
+      //   2 drifting in orbit, 2 holding position (they do not come to you, one sits deep in the well),
+      //   2 holding position inside a shield bubble the gunner must shoot down first.
+      const h = M.hole, start = Math.PI; // the ship starts on the left
+      const place = (ang, r, shield) => {
+        const a = ang + rand(-0.25, 0.25);
+        mkPickup('pod', h.x + Math.cos(a) * r, h.y + Math.sin(a) * r, 0.001, 0.001);
+        const p = pickups[pickups.length - 1];
+        p.anchor = true; p.vx = p.vy = 0;
+        if (shield) { p.shieldMax = Math.round(shield * (1 + 0.3 * diff())); p.shield = p.shieldMax; p.shieldT = 9; p.reboot = 0; }
+      };
+      place(start + Math.PI, 270 + 20 * diff(), 0);          // far side, deep in the well
+      place(start + Math.PI / 2, 1150, 0);                   // bottom, out wide
+      place(start - Math.PI / 2, 620, 22);                   // top, shielded
+      place(start + Math.PI * 0.75, 980, 22);                // lower right, shielded
+      for (const r of [520, 820]) mkOrbiter(null, (x, y) => { mkPickup('pod', x, y); return pickups[pickups.length - 1]; }, r - 30, r + 30);
       for (let i = 0; i < M.debris; i++) mkOrbiter(asts, (x, y) => mkAst(x, y, Math.random() < 0.5 ? 0 : 1), 260, 1500);
     },
     update(dt) {
@@ -556,7 +571,7 @@
     if (ship.field) {
       for (const t of pickups) {
         const d = dist(t, ship);
-        if (d > FIELD_R) continue;
+        if (d > FIELD_R || t.shield > 0) continue;
         // a gentle tug at the rim, a hard pull up close
         const near = 1 - d / FIELD_R, k2 = 0.08 + 0.92 * near * near;
         const a = Math.atan2(ship.y - t.y, ship.x - t.x), pull = (t.type === 'pod' ? 900 : 1500) * k2;
@@ -636,6 +651,7 @@
       let tgt = null, bd = combat ? 950 : 520, isEnemy = false;
       for (const e of enemies) { if (e.dormant) continue; const d = dist(e, ship); if (d < bd && !(e.type === 'boss' && turretsAlive())) { bd = d; tgt = e; isEnemy = true; } }
       if (!tgt) { bd = 190; for (const a of asts) { const d = dist(a, ship) - a.r; if (d < bd) { bd = d; tgt = a; } } }
+      if (!tgt) { bd = 480; for (const p of pickups) { if (!(p.shield > 0)) continue; const d = dist(p, ship); if (d < bd) { bd = d; tgt = p; } } }
       const lead = tgt ? dist(tgt, ship) / 950 : 0; // aim where the target will be
       // shots inherit 40% of the ship's velocity, so lead by the target's velocity relative to that
       const px = tgt ? tgt.x + (tgt.vx - ship.vx * 0.4) * lead : ship.x + Math.cos(ship.ang) * 150;
@@ -856,15 +872,31 @@
         if (a.dead || Math.hypot(a.x - s.x, a.y - s.y) > a.r + 3) continue;
         damageAst(a, s.dmg, s.by); hit = a; break;
       }
+      if (!hit) for (const p of pickups) {
+        if (!(p.shield > 0) || Math.hypot(p.x - s.x, p.y - s.y) > POD_BUBBLE) continue;
+        p.shield -= s.dmg; p.shieldT = 0; hit = p;
+        if (p.shield <= 0) { p.shield = 0; p.reboot = 0; explode(p.x, p.y, 0.35, '#8fd8ff'); addText(p.x, p.y - 44, 'BUBBLE DOWN - GRAB IT!', C.hull); }
+        break;
+      }
       if (hit && s.torp) detonate(s, hit);
       if (hit) { s.life = 0; stats.hits++; addParts(s.x, s.y, 4, s.by === 'gun' ? C.gun : C.pilot, 120, 0.25, 2); }
     }
   }
 
+  const POD_BUBBLE = 38, POD_REBOOT = 7;
   function updatePickups(dt) {
     for (const p of pickups) {
       p.t += dt; p.life -= dt;
-      if (applyHole(p, dt)) {
+      if (p.shieldMax) {
+        p.shieldT += dt;
+        if (p.shield > 0 && p.shieldT > 3) p.shield = Math.min(p.shieldMax, p.shield + p.shieldMax * 0.25 * dt);
+        if (p.shield <= 0) {
+          // a broken bubble reboots after a while, so the pilot has to be close when the gunner pops it
+          p.reboot += dt;
+          if (p.reboot >= POD_REBOOT) { p.shield = p.shieldMax; p.reboot = 0; p.shieldT = 0; addText(p.x, p.y - 44, 'SHIELD RESTORED', C.bad); Sfx.shieldUp(); }
+        }
+      }
+      if (!p.anchor && applyHole(p, dt)) {
         p.life = 0; addParts(p.x, p.y, 10, C.white, 60, 0.6, 2);
         if (p.type === 'pod') {
           // a lost pod is replaced further out, so the mission can always be finished
@@ -874,9 +906,10 @@
         continue;
       }
       p.x += p.vx * dt; p.y += p.vy * dt;
-      if (!p.orbit) { const k = Math.exp(-0.6 * dt); p.vx *= k; p.vy *= k; }
+      if (p.anchor) { const k = Math.exp(-3 * dt); p.vx *= k; p.vy *= k; } // thrusters hold it in place
+      else if (!p.orbit) { const k = Math.exp(-0.6 * dt); p.vx *= k; p.vy *= k; }
       p.x = clamp(p.x, 20, world.w - 20); p.y = clamp(p.y, 20, world.h - 20);
-      if (dist(p, ship) < 30 + p.r) {
+      if (dist(p, ship) < 30 + p.r && !(p.shield > 0)) {
         p.life = 0; Sfx.pickup(); stats.picked++;
         if (p.type === 'cell') { ship.shield = Math.min(100, ship.shield + 40); ship.boost = 1; addText(p.x, p.y, 'ENERGY', C.eng); }
         else if (p.type === 'repair') { ship.hull = Math.min(100, ship.hull + 25); addText(p.x, p.y, 'HULL +25', C.hull); }
@@ -1067,7 +1100,6 @@
     ctx.strokeStyle = C.bad; ctx.lineWidth = 2.5; ctx.setLineDash([12, 10]); ctx.lineDashOffset = -h.spin * 20;
     ctx.beginPath(); ctx.arc(0, 0, h.R, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
     ctx.restore();
-    txt('EVENT HORIZON', h.x, h.y - h.R - 18, 13, C.bad, 'center', 0.8);
   }
   function drawWorld() {
     ctx.save();
@@ -1153,6 +1185,20 @@
       noGlow();
       ctx.restore();
       if (p.type === 'pod') txt('SOS', p.x, p.y - 24, 11, C.white, 'center', 0.5 + 0.5 * Math.sin(p.t * 5));
+      if (p.shield > 0) {
+        const f = p.shield / p.shieldMax, hitFx = p.shieldT < 0.12;
+        ctx.save(); ctx.translate(p.x, p.y);
+        ctx.fillStyle = '#8fd8ff'; ctx.globalAlpha = 0.08 + 0.1 * f; ctx.beginPath(); ctx.arc(0, 0, POD_BUBBLE, 0, TAU); ctx.fill();
+        ctx.strokeStyle = hitFx ? '#ffffff' : '#8fd8ff'; ctx.globalAlpha = 0.5 + 0.5 * f; ctx.lineWidth = 2 + 2 * f; glow('#8fd8ff', 14);
+        for (let i = 0; i < 6; i++) { const a = p.t * 0.8 + i * TAU / 6; ctx.beginPath(); ctx.arc(0, 0, POD_BUBBLE, a, a + TAU / 6 - 0.12); ctx.stroke(); }
+        noGlow(); ctx.globalAlpha = 1; ctx.restore();
+        bar(p.x - 24, p.y + POD_BUBBLE + 6, 48, 6, f, '#8fd8ff');
+      } else if (p.shieldMax) {
+        // countdown until the bubble comes back
+        ctx.strokeStyle = C.bad; ctx.lineWidth = 3; ctx.globalAlpha = 0.8;
+        ctx.beginPath(); ctx.arc(p.x, p.y, POD_BUBBLE, -Math.PI / 2, -Math.PI / 2 + TAU * (1 - p.reboot / POD_REBOOT)); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
     }
 
     // attractor field
@@ -1287,7 +1333,7 @@
     const nav = M.def.nav();
     if (nav) edgeArrow(nav.x, nav.y, C.hull, 14, Math.round(dist(nav, ship) / 10) + 'm');
     if (M.hole) {
-      edgeArrow(M.hole.x, M.hole.y, '#ff8a3c', 11, 'HOLE');
+      edgeArrow(M.hole.x, M.hole.y, '#ff8a3c', 11);
       const pull = holePull(Math.max(1, dist(ship, M.hole))) / SHIP_THRUST;
       if (pull > 0.35) {
         const danger = pull >= 0.75, inside = pull > HOLE_EDGE_PULL;
